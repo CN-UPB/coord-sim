@@ -4,11 +4,11 @@ requirements = [
     'networkx',
     'geopy',
     'pyyaml>=5.1',
-    'numpy==1.16.4',
+    'numpy',
     'common-utils',
     'sklearn',
     'pandas',
-    'tensorflow==1.14.0',
+    'tensorflow<2',
     'keras==2.2.5',
 ]
 
