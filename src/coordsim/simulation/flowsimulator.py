@@ -22,6 +22,7 @@ class FlowSimulator:
         self.env = env
         self.params = params
         self.total_flow_count = 0
+        self.flow_trigger = self.env.event()
 
     def start(self):
         """
@@ -102,7 +103,7 @@ class FlowSimulator:
             self.params.metrics.dropped_flow(flow)
             return
 
-    def pass_flow(self, flow, sfc):
+    def pass_flow(self, flow, sfc, request_decision=True):
         """
         Passes the flow to the next node to begin processing.
         The flow might still be arriving at a previous node or SF.
@@ -115,11 +116,18 @@ class FlowSimulator:
         attribute of the flow object.
         """
 
+        # If request decision is True, trigger the event 
+        if request_decision:
+            self.flow_trigger.succeed(value=(flow, sfc))
+            return
+        
+
         # set current sf of flow
         sf = sfc[flow.current_position]
         flow.current_sf = sf
         self.params.metrics.add_requesting_flow(flow)
 
+        # TODO: Get rid of this to remove scheduling tables
         next_node = self.get_next_node(flow, sf)
         yield self.env.process(self.forward_flow(flow, next_node))
 
@@ -127,6 +135,7 @@ class FlowSimulator:
                  .format(flow.flow_id, flow.current_node_id, self.env.now))
         yield self.env.process(self.process_flow(flow, sfc))
 
+    # TODO: Cancel this function, not needed when using routing. 
     def get_next_node(self, flow, sf):
         """
         Get next node using weighted probabilites from the scheduler
