@@ -22,7 +22,7 @@ class FlowSimulator:
         self.env = env
         self.params = params
         self.total_flow_count = 0
-        self.flow_trigger = self.env.event()
+        self.flow_triggers = {node[0]: self.env.event() for node in self.params.ing_nodes}
 
     def start(self):
         """
@@ -116,11 +116,10 @@ class FlowSimulator:
         attribute of the flow object.
         """
 
-        # If request decision is True, trigger the event 
+        # If request decision is True, trigger the event
         if request_decision:
-            self.flow_trigger.succeed(value=(flow, sfc))
+            self.flow_triggers[flow.current_node_id].succeed(value=(flow, sfc))
             return
-        
 
         # set current sf of flow
         sf = sfc[flow.current_position]
@@ -135,7 +134,7 @@ class FlowSimulator:
                  .format(flow.flow_id, flow.current_node_id, self.env.now))
         yield self.env.process(self.process_flow(flow, sfc))
 
-    # TODO: Cancel this function, not needed when using routing. 
+    # TODO: Cancel this function, not needed when using routing.
     def get_next_node(self, flow, sf):
         """
         Get next node using weighted probabilites from the scheduler

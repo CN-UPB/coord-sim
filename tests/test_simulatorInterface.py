@@ -5,6 +5,7 @@ Simulator interface tests
 from unittest import TestCase
 
 from spinterface import SimulatorInterface, SimulatorAction, SimulatorState
+from siminterface import Simulator
 
 NETWORK_FILE = "params/networks/triangle.graphml"
 SERVICE_FUNCTIONS_FILE = "params/services/3sfcs.yaml"
@@ -15,7 +16,7 @@ TRACE_FILE = "params/traces/default_trace.csv"
 SIMULATOR_MODULE_NAME = "siminterface.simulator"
 SIMULATOR_CLS_NAME = "Simulator"
 SIMULATOR_MODULE = __import__(SIMULATOR_MODULE_NAME)
-SIMULATOR_CLS = getattr(SIMULATOR_MODULE, SIMULATOR_CLS_NAME)
+SIMULATOR_CLS = Simulator
 TEST_MODE = False
 
 
@@ -28,9 +29,9 @@ class TestSimulatorInterface(TestCase):
         create simulator for test cases
         """
         # TODO: replace SimulatorInterface with implementation
-        self.simulator = SIMULATOR_CLS(NETWORK_FILE, SERVICE_FUNCTIONS_FILE, CONFIG_FILE, test_mode=TEST_MODE,
-                                       resource_functions_path=RESOURCE_FUNCTION_PATH)
-        self.simulator.init(1234)
+        self.flow_simulator = SIMULATOR_CLS(NETWORK_FILE, SERVICE_FUNCTIONS_FILE, CONFIG_FILE, test_mode=TEST_MODE,
+                                            resource_functions_path=RESOURCE_FUNCTION_PATH)
+        self.flow_simulator.init(1234)
 
     def test_apply(self):
         # test if placement and schedule can be applied
@@ -202,7 +203,7 @@ class TestSimulatorInterface(TestCase):
             }
 
         action = SimulatorAction(placement=placement, scheduling=flow_schedule)
-        simulator_state = self.simulator.apply(action)
+        simulator_state = self.flow_simulator.apply(action)
         self.assertIsInstance(simulator_state, SimulatorState)
 
         # test if network is read correctly

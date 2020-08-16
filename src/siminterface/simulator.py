@@ -114,9 +114,10 @@ class Simulator(SimulatorInterface):
 
         # Run the environment for one step to get initial stats.
         # self.env.step()
-        flow, sfc = self.env.run(until=self.simulator.flow_trigger)
-        # reset the trigger 
-        self.simulator.flow_trigger = self.env.event()
+        event_info = self.env.run(until=simpy.events.AnyOf(self.env, list(self.simulator.flow_triggers.values())))
+        # reset the trigger
+        flow, sfc = event_info.events[0].value
+        self.simulator.flow_triggers[flow.current_node_id] = self.env.event()
 
         # Parse the NetworkX object into a dict format specified in SimulatorState. This is done to account
         # for changing node remaining capacities.
@@ -174,10 +175,11 @@ class Simulator(SimulatorInterface):
         runtime_steps = self.duration * self.run_times
         logger.debug("Running simulator until time step %s", runtime_steps)
         # self.env.run(until=runtime_steps)
-        flow, sfc = self.env.run(until=self.simulator.flow_trigger)
-        # reset the trigger 
-        self.simulator.flow_trigger = self.env.event()
-        
+        event_info = self.env.run(until=simpy.events.AnyOf(self.env, list(self.simulator.flow_triggers.values())))
+        # reset the trigger
+        flow, sfc = event_info.events[0].value
+        self.simulator.flow_triggers[flow.current_node_id] = self.env.event()
+
         # Parse the NetworkX object into a dict format specified in SimulatorState. This is done to account
         # for changing node remaining capacities.
         # Also, parse the network stats and prepare it in SimulatorState format.
