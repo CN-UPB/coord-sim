@@ -22,7 +22,8 @@ class FlowSimulator:
         self.env = env
         self.params = params
         self.total_flow_count = 0
-        self.flow_triggers = {node[0]: self.env.event() for node in self.params.ing_nodes}
+        # Create triggers for the first 20 flows, flows add it themselves afterwards
+        self.flow_triggers = {f"{i}": self.env.event() for i in range(1, 20)}
 
     def start(self):
         """
@@ -99,11 +100,12 @@ class FlowSimulator:
             yield self.env.process(self.pass_flow(flow, sfc))
         else:
             log.info(f"Requested SFC was not found. Dropping flow {flow.flow_id}")
+            del self.flow_triggers[flow.flow_id]
             # Update metrics for the dropped flow
             self.params.metrics.dropped_flow(flow)
             return
 
-    def pass_flow(self, flow, sfc, request_decision=True):
+    def pass_flow(self, flow, sfc, request_decision=True, next_node=None):
         """
         Passes the flow to the next node to begin processing.
         The flow might still be arriving at a previous node or SF.
@@ -115,24 +117,52 @@ class FlowSimulator:
         instead of pass_flow(). The position of the flow within the SFC is determined using current_position
         attribute of the flow object.
         """
-
-        # If request decision is True, trigger the event
-        if request_decision:
-            self.flow_triggers[flow.current_node_id].succeed(value=(flow, sfc))
-            return
-
         # set current sf of flow
         sf = sfc[flow.current_position]
         flow.current_sf = sf
+
+        # Check if TTL is above zero to make sure flow is still relevant
+        if flow.ttl <= 0:
+            log.info(f"Flow {flow.flow_id} passed TTL! Dropping flow")
+            del self.flow_triggers[flow.flow_id]
+            # Update metrics for the dropped flow
+            self.params.metrics.dropped_flow(flow)
+            return
+
+        # If request decision is True, trigger the event
+        if request_decision:
+            # Create an event trigger for the flow
+            # If it does not exist, create it
+            if flow.flow_id not in self.flow_triggers:
+                self.flow_triggers[flow.flow_id] = self.env.event()
+
+            # Trigger then reset
+            self.flow_triggers[flow.flow_id].succeed(value=(flow, sfc))
+            self.flow_triggers[flow.flow_id] = self.env.event()
+            return
+
+        if next_node is None:
+            log.info(f"No node to forward flow {flow.flow_id} to. Dropping it")
+            # Update metrics for the dropped flow
+            del self.flow_triggers[flow.flow_id]
+            self.params.metrics.dropped_flow(flow)
+            return
+
         self.params.metrics.add_requesting_flow(flow)
 
         # TODO: Get rid of this to remove scheduling tables
-        next_node = self.get_next_node(flow, sf)
-        yield self.env.process(self.forward_flow(flow, next_node))
+        # next_node = self.get_next_node(flow, sf)
+        if next_node == flow.current_node_id:
+            yield self.env.process(self.forward_flow(flow, next_node))
 
-        log.info("Flow {} STARTED ARRIVING at node {} for processing. Time: {}"
-                 .format(flow.flow_id, flow.current_node_id, self.env.now))
-        yield self.env.process(self.process_flow(flow, sfc))
+            log.info("Flow {} STARTED ARRIVING at node {} for processing. Time: {}"
+                     .format(flow.flow_id, flow.current_node_id, self.env.now))
+
+            # TODO: Call pass_flow here before actually processing at next node
+            yield self.env.process(self.process_flow(flow, sfc))
+        else:
+            yield self.env.process(self.forward_flow(flow, next_node))
+            yield self.env.process(self.pass_flow(flow, sfc))
 
     # TODO: Cancel this function, not needed when using routing.
     def get_next_node(self, flow, sf):
@@ -156,11 +186,13 @@ class FlowSimulator:
                 log.warning(f'Flow {flow.flow_id}: Scheduling rule at node {flow.current_node_id} not correct'
                             f'Dropping flow!')
                 log.warning(ex)
+                del self.flow_triggers[flow.flow_id]
                 self.params.metrics.dropped_flow(flow)
                 return
         else:
             # Scheduling rule does not exist: drop flow
             log.warning(f'Flow {flow.flow_id}: Scheduling rule not found at {flow.current_node_id}. Dropping flow!')
+            del self.flow_triggers[flow.flow_id]
             self.params.metrics.dropped_flow(flow)
             return
 
@@ -172,6 +204,7 @@ class FlowSimulator:
         """
         if next_node is None:
             log.info(f"No node to forward flow {flow.flow_id} to. Dropping it")
+            del self.flow_triggers[flow.flow_id]
             # Update metrics for the dropped flow
             self.params.metrics.dropped_flow(flow)
             return
@@ -183,6 +216,9 @@ class FlowSimulator:
         # Metrics calculation for path delay. Flow's end2end delay is also incremented.
         self.params.metrics.add_path_delay(path_delay)
         flow.end2end_delay += path_delay
+        # deduct path_delay from TTL
+        flow.ttl -= path_delay
+
         if flow.current_node_id == next_node:
             assert path_delay == 0, "While Forwarding the flow, the Current and Next node same, yet path_delay != 0"
             log.info("Flow {} will stay in node {}. Time: {}.".format(flow.flow_id, flow.current_node_id, self.env.now))
@@ -213,6 +249,8 @@ class FlowSimulator:
             # Add the delay to the flow's end2end delay
             self.params.metrics.add_processing_delay(processing_delay)
             flow.end2end_delay += processing_delay
+            # Deduct processing delay from flow TTL
+            flow.ttl -= processing_delay
 
             # Calculate the demanded capacity when the flow is processed at this node
             demanded_total_capacity = 0.0
@@ -308,11 +346,13 @@ class FlowSimulator:
                 assert node_remaining_cap <= node_cap, "Node remaining capacity cannot be more than node capacity!"
             else:
                 log.info(f"Not enough capacity for flow {flow.flow_id} at node {flow.current_node_id}. Dropping flow.")
+                del self.flow_triggers[flow.flow_id]
                 # Update metrics for the dropped flow
                 self.params.metrics.dropped_flow(flow)
                 return
         else:
             log.info(f"SF {sf} was not found at {current_node_id}. Dropping flow {flow.flow_id}")
+            del self.flow_triggers[flow.flow_id]
             self.params.metrics.dropped_flow(flow)
             return
 
@@ -320,6 +360,8 @@ class FlowSimulator:
         """
         Process the flow at the requested SF of the current node.
         """
+        # Cleanup flow trigger dict
+        del self.flow_triggers[flow.flow_id]
         # Update metrics for the processed flow
         self.params.metrics.completed_flow()
         self.params.metrics.add_end2end_delay(flow.end2end_delay)
