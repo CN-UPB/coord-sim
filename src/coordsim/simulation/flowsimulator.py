@@ -23,7 +23,8 @@ class FlowSimulator:
         self.params = params
         self.total_flow_count = 0
         # Create triggers for the first 20 flows, flows add it themselves afterwards
-        self.flow_triggers = {f"{i}": self.env.event() for i in range(1, 20)}
+        # self.flow_triggers = {f"{i}": self.env.event() for i in range(1, 20)}
+        self.flow_trigger = self.env.event()
 
     def start(self):
         """
@@ -100,7 +101,7 @@ class FlowSimulator:
             yield self.env.process(self.pass_flow(flow, sfc))
         else:
             log.info(f"Requested SFC was not found. Dropping flow {flow.flow_id}")
-            del self.flow_triggers[flow.flow_id]
+            # del self.flow_triggers[flow.flow_id]
             # Update metrics for the dropped flow
             self.params.metrics.dropped_flow(flow)
             return
@@ -124,7 +125,7 @@ class FlowSimulator:
         # Check if TTL is above zero to make sure flow is still relevant
         if flow.ttl <= 0:
             log.info(f"Flow {flow.flow_id} passed TTL! Dropping flow")
-            del self.flow_triggers[flow.flow_id]
+            # del self.flow_triggers[flow.flow_id]
             # Update metrics for the dropped flow
             self.params.metrics.dropped_flow(flow)
             return
@@ -133,24 +134,26 @@ class FlowSimulator:
         if request_decision:
             # Create an event trigger for the flow
             # If it does not exist, create it
-            if flow.flow_id not in self.flow_triggers:
-                self.flow_triggers[flow.flow_id] = self.env.event()
+            # if flow.flow_id not in self.flow_triggers:
+                # self.flow_triggers[flow.flow_id] = self.env.event()
 
             # Trigger then reset
-            self.flow_triggers[flow.flow_id].succeed(value=(flow, sfc))
-            self.flow_triggers[flow.flow_id] = self.env.event()
+            # self.flow_triggers[flow.flow_id].succeed(value=(flow, sfc))
+            # self.flow_triggers[flow.flow_id] = self.env.event()
+            self.flow_trigger.succeed(value=(flow, sfc))
+            self.flow_trigger = self.env.event()
             return
 
         if next_node is None:
             log.info(f"No node to forward flow {flow.flow_id} to. Dropping it")
             # Update metrics for the dropped flow
-            del self.flow_triggers[flow.flow_id]
+            # del self.flow_triggers[flow.flow_id]
             self.params.metrics.dropped_flow(flow)
             return
 
         self.params.metrics.add_requesting_flow(flow)
 
-        # TODO: Get rid of this to remove scheduling tables
+        # DONE-TODO: Get rid of this to remove scheduling tables
         # next_node = self.get_next_node(flow, sf)
         if next_node == flow.current_node_id:
             yield self.env.process(self.forward_flow(flow, next_node))
@@ -158,43 +161,43 @@ class FlowSimulator:
             log.info("Flow {} STARTED ARRIVING at node {} for processing. Time: {}"
                      .format(flow.flow_id, flow.current_node_id, self.env.now))
 
-            # TODO: Call pass_flow here before actually processing at next node
+            # DONE-TODO: Call pass_flow here before actually processing at next node
             yield self.env.process(self.process_flow(flow, sfc))
         else:
             yield self.env.process(self.forward_flow(flow, next_node))
             yield self.env.process(self.pass_flow(flow, sfc))
 
     # TODO: Cancel this function, not needed when using routing.
-    def get_next_node(self, flow, sf):
-        """
-        Get next node using weighted probabilites from the scheduler
-        """
-        schedule = self.params.schedule
-        # Check if scheduling rule exists
-        if (flow.current_node_id in schedule) and flow.sfc in schedule[flow.current_node_id]:
-            schedule_node = schedule[flow.current_node_id]
-            schedule_sf = schedule_node[flow.sfc][sf]
-            sf_nodes = [sch_sf for sch_sf in schedule_sf.keys()]
-            sf_probability = [prob for name, prob in schedule_sf.items()]
-            try:
-                next_node = np.random.choice(sf_nodes, p=sf_probability)
-                return next_node
+    # def get_next_node(self, flow, sf):
+    #     """
+    #     Get next node using weighted probabilites from the scheduler
+    #     """
+    #     schedule = self.params.schedule
+    #     # Check if scheduling rule exists
+    #     if (flow.current_node_id in schedule) and flow.sfc in schedule[flow.current_node_id]:
+    #         schedule_node = schedule[flow.current_node_id]
+    #         schedule_sf = schedule_node[flow.sfc][sf]
+    #         sf_nodes = [sch_sf for sch_sf in schedule_sf.keys()]
+    #         sf_probability = [prob for name, prob in schedule_sf.items()]
+    #         try:
+    #             next_node = np.random.choice(sf_nodes, p=sf_probability)
+    #             return next_node
 
-            except Exception as ex:
+    #         except Exception as ex:
 
-                # Scheduling rule does not exist: drop flow
-                log.warning(f'Flow {flow.flow_id}: Scheduling rule at node {flow.current_node_id} not correct'
-                            f'Dropping flow!')
-                log.warning(ex)
-                del self.flow_triggers[flow.flow_id]
-                self.params.metrics.dropped_flow(flow)
-                return
-        else:
-            # Scheduling rule does not exist: drop flow
-            log.warning(f'Flow {flow.flow_id}: Scheduling rule not found at {flow.current_node_id}. Dropping flow!')
-            del self.flow_triggers[flow.flow_id]
-            self.params.metrics.dropped_flow(flow)
-            return
+    #             # Scheduling rule does not exist: drop flow
+    #             log.warning(f'Flow {flow.flow_id}: Scheduling rule at node {flow.current_node_id} not correct'
+    #                         f'Dropping flow!')
+    #             log.warning(ex)
+    #             # del self.flow_triggers[flow.flow_id]
+    #             self.params.metrics.dropped_flow(flow)
+    #             return
+    #     else:
+    #         # Scheduling rule does not exist: drop flow
+    #         log.warning(f'Flow {flow.flow_id}: Scheduling rule not found at {flow.current_node_id}. Dropping flow!')
+    #         # del self.flow_triggers[flow.flow_id]
+    #         self.params.metrics.dropped_flow(flow)
+    #         return
 
     def forward_flow(self, flow, next_node):
         """
@@ -204,7 +207,7 @@ class FlowSimulator:
         """
         if next_node is None:
             log.info(f"No node to forward flow {flow.flow_id} to. Dropping it")
-            del self.flow_triggers[flow.flow_id]
+            # del self.flow_triggers[flow.flow_id]
             # Update metrics for the dropped flow
             self.params.metrics.dropped_flow(flow)
             return
@@ -346,13 +349,13 @@ class FlowSimulator:
                 assert node_remaining_cap <= node_cap, "Node remaining capacity cannot be more than node capacity!"
             else:
                 log.info(f"Not enough capacity for flow {flow.flow_id} at node {flow.current_node_id}. Dropping flow.")
-                del self.flow_triggers[flow.flow_id]
+                # del self.flow_triggers[flow.flow_id]
                 # Update metrics for the dropped flow
                 self.params.metrics.dropped_flow(flow)
                 return
         else:
             log.info(f"SF {sf} was not found at {current_node_id}. Dropping flow {flow.flow_id}")
-            del self.flow_triggers[flow.flow_id]
+            # del self.flow_triggers[flow.flow_id]
             self.params.metrics.dropped_flow(flow)
             return
 
@@ -361,7 +364,7 @@ class FlowSimulator:
         Process the flow at the requested SF of the current node.
         """
         # Cleanup flow trigger dict
-        del self.flow_triggers[flow.flow_id]
+        # del self.flow_triggers[flow.flow_id]
         # Update metrics for the processed flow
         self.params.metrics.completed_flow()
         self.params.metrics.add_end2end_delay(flow.end2end_delay)

@@ -51,7 +51,7 @@ class Simulator(SimulatorInterface):
         if 'write_schedule' in self.config and self.config['write_schedule']:
             write_schedule = True
         # Create CSV writer
-        self.writer = ResultWriter(self.test_mode, self.test_dir, write_schedule)
+        self.writer = ResultWriter(self.test_mode, self.test_dir, write_schedule, recording_spacings=self.params.run_duration)
         self.episode = 0
         # Load trace file
         if 'trace_path' in self.config:
@@ -100,9 +100,10 @@ class Simulator(SimulatorInterface):
         random.seed(self.seed)
         numpy.random.seed(self.seed)
 
-        self.params.reset_flow_lists()
+        # TODO: Do not need flow arrival list
+        # self.params.reset_flow_lists()
         # generate flow lists 1x here since we are in `init()`
-        self.params.generate_flow_lists()
+        # self.params.generate_flow_lists()
 
         # Instantiate a simulator object, pass the environment and params
         self.simulator = FlowSimulator(self.env, self.params)
@@ -116,11 +117,13 @@ class Simulator(SimulatorInterface):
 
         # Run the environment for one step to get initial stats.
         # self.env.step()
-        event_info = self.env.run(until=simpy.events.AnyOf(self.env, list(self.simulator.flow_triggers.values())))
-        # reset the trigger
-        flow, sfc = event_info.events[0].value
+        # self.flow_trigger_list = list(self.simulator.flow_triggers.values())
+        # event_info = self.env.run(until=simpy.events.AnyOf(self.env, self.flow_trigger_list))
+        # # get the latest trigger list
+        # self.flow_trigger_list = list(self.simulator.flow_triggers.values())
+        # flow, sfc = event_info.events[0].value
         # self.simulator.flow_triggers[flow.current_node_id] = self.env.event()
-
+        flow, sfc = self.env.run(until=self.simulator.flow_trigger)
         # Parse the NetworkX object into a dict format specified in SimulatorState. This is done to account
         # for changing node remaining capacities.
         # Also, parse the network stats and prepare it in SimulatorState format.
@@ -207,10 +210,13 @@ class Simulator(SimulatorInterface):
                 next_node=actions.destination_node_id
             )
         )
-        event_info = self.env.run(until=simpy.events.AnyOf(self.env, list(self.simulator.flow_triggers.values())))
-        # reset the trigger
-        flow, sfc = event_info.events[0].value
+        # self.flow_trigger_list = list(self.simulator.flow_triggers.values())
+        # event_info = self.env.run(until=simpy.events.AnyOf(self.env, self.flow_trigger_list))
+        # get the latest trigger list
+        # self.flow_trigger_list = list(self.simulator.flow_triggers.values())
+        # flow, sfc = event_info.events[0].value
         # self.simulator.flow_triggers[flow.current_node_id] = self.env.event()
+        flow, sfc = self.env.run(until=self.simulator.flow_trigger)
 
         # Parse the NetworkX object into a dict format specified in SimulatorState. This is done to account
         # for changing node remaining capacities.
@@ -229,7 +235,7 @@ class Simulator(SimulatorInterface):
         if self.params.use_states:
             self.params.update_state()
         # generate flow data for next run (used for prediction)
-        self.params.generate_flow_lists(now=self.env.now)
+        # self.params.generate_flow_lists(now=self.env.now)
 
         # Check to see if traffic prediction is enabled to provide future traffic not current traffic
         if self.prediction:

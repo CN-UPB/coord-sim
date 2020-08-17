@@ -13,11 +13,13 @@ class ResultWriter():
     Result Writer
     Helper class to write results to CSV files.
     """
-    def __init__(self, test_mode: bool, test_dir, write_schedule=False):
+    def __init__(self, test_mode: bool, test_dir, write_schedule=False, recording_spacings=100):
         """
         If the simulator is in test mode, create result folder and CSV files
         """
-        self.write_schedule = write_schedule
+        self.last_recording_time = 0
+        self.recording_spacings = recording_spacings
+        self.write_schedule = False
         self.test_mode = test_mode
         if self.test_mode:
             if self.write_schedule:
@@ -87,32 +89,36 @@ class ResultWriter():
         """
         Write simulator actions to CSV files for statistics purposes
         """
-        if self.test_mode:
-            placement = action.placement
-            placement_output = []
-            scheduling_output = []
+        # TODO: Add discrete action recording
+        # if self.test_mode:
+        #     placement = action.placement
+        #     placement_output = []
+        #     scheduling_output = []
 
-            for node_id, sfs in placement.items():
-                for sf in sfs:
-                    placement_output_row = [episode, time, node_id, sf]
-                    placement_output.append(placement_output_row)
-            if self.write_schedule:
-                scheduling = action.scheduling
-                for node, sfcs in scheduling.items():
-                    for sfc, sfs in sfcs.items():
-                        for sf, scheduling in sfs.items():
-                            for schedule_node, schedule_prob in scheduling.items():
-                                scheduling_output_row = [episode, time, node, sfc, sf, schedule_node, schedule_prob]
-                                scheduling_output.append(scheduling_output_row)
-                self.scheduling_writer.writerows(scheduling_output)
+        #     for node_id, sfs in placement.items():
+        #         for sf in sfs:
+        #             placement_output_row = [episode, time, node_id, sf]
+        #             placement_output.append(placement_output_row)
+        #     if self.write_schedule:
+        #         scheduling = action.scheduling
+        #         for node, sfcs in scheduling.items():
+        #             for sfc, sfs in sfcs.items():
+        #                 for sf, scheduling in sfs.items():
+        #                     for schedule_node, schedule_prob in scheduling.items():
+        #                         scheduling_output_row = [episode, time, node, sfc, sf, schedule_node, schedule_prob]
+        #                         scheduling_output.append(scheduling_output_row)
+        #         self.scheduling_writer.writerows(scheduling_output)
 
-            self.placement_writer.writerows(placement_output)
+        #     self.placement_writer.writerows(placement_output)
+        pass
 
     def write_state_results(self, episode, time, state: SimulatorState, metrics):
         """
         Write node resource consumption to CSV file
         """
-        if self.test_mode:
+        # TODO: UPDATE METRICS WRITING to include new ones for discrete action
+        if self.test_mode and time >= self.last_recording_time + self.recording_spacings:
+            self.last_recording_time = time
             network = state.network
             stats = state.network_stats
 
@@ -120,10 +126,10 @@ class ResultWriter():
                               stats['in_network_flows'], stats['avg_end2end_delay']]
 
             resource_output = []
-            for node in network['nodes']:
-                node_id = node['id']
-                node_cap = node['resource']
-                used_resources = node['used_resources']
+            for node in network.nodes(data=True):
+                node_id = node[0]
+                node_cap = node[1]['cap']
+                used_resources = node_cap - node[1]['remaining_cap']
                 ingress_traffic = 0
                 # get all sfc
                 sfcs = list(state.sfcs.keys())

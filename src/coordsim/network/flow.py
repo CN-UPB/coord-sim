@@ -10,7 +10,7 @@ TODO: Add get/set methods
 class Flow:
 
     def __init__(self, flow_id, sfc, dr, size, creation_time, destination=None, egress_node_id=None, current_sf=None,
-                 current_node_id=None, current_position=0, end2end_delay=0.0, ttl=200):
+                 current_node_id=None, current_position=0, end2end_delay=0.0, ttl=50):
 
         # Flow ID: Unique ID string
         self.flow_id = flow_id
