@@ -4,7 +4,10 @@ Simulator interface tests
 """
 from unittest import TestCase
 
-from spinterface import SimulatorInterface, SimulatorAction, SimulatorState
+from spinterface import SimulatorInterface
+from spr_rl.sprinterface.action import SPRAction
+from spr_rl.sprinterface.state import SPRState
+from coordsim.network.flow import Flow
 from siminterface import Simulator
 
 NETWORK_FILE = "params/networks/triangle.graphml"
@@ -202,26 +205,19 @@ class TestSimulatorInterface(TestCase):
                 },
             }
 
-        action = SimulatorAction(placement=placement, scheduling=flow_schedule)
+        flow = Flow('1', 'sfc_1', 1, 1, 0)
+        flow.current_node_id = 'pop0'
+        action = SPRAction(flow, 'pop0')
         simulator_state = self.flow_simulator.apply(action)
-        self.assertIsInstance(simulator_state, SimulatorState)
+        self.assertIsInstance(simulator_state, SPRState)
 
         # test if network is read correctly
-        nw_nodes = simulator_state.network['nodes']
+        nw_nodes = simulator_state.network.nodes
         self.assertIs(len(nw_nodes), 3)
         # 3 bidirectional edges
-        edges = simulator_state.network['edges']
+        edges = simulator_state.network.edges
         self.assertIs(len(edges), 3)
-        # with 5 edge attributes:
-        # 'edges': [{
-        #     'src': str,
-        #     'dst': str,
-        #     'delay': int (ms),
-        #     'data_rate': int (Mbit/s),
-        #     'used_data_rate': int (Mbit/s),
-        # }],
-        nw_edges = simulator_state.network['edges'][0]
-        self.assertIs(len(nw_edges), 5)
+
 
         # Check if placement is read correctly
         sim_placement = simulator_state.placement
@@ -250,7 +246,7 @@ class TestSimulatorInterface(TestCase):
             }
         """
         network_stats = simulator_state.network_stats
-        self.assertIs(len(network_stats), 11)
+        self.assertIs(len(network_stats), 14)
         self.assertIn('total_flows', network_stats)
         self.assertIn('successful_flows', network_stats)
         self.assertIn('dropped_flows', network_stats)
