@@ -118,11 +118,15 @@ def weight(edge_cap, edge_delay):
     return 1 / (edge_cap + 1 / edge_delay)
 
 
-def network_diameter(nx_network):
+def network_diameter(nx_network, diameter_type="delay"):
     """Return the network diameter, ie, delay of longest shortest path"""
     if 'shortest_paths' not in nx_network.graph:
         shortest_paths(nx_network)
-    return max([path[1] for path in nx_network.graph['shortest_paths'].values()])
+    if diameter_type == "delay":
+        return max([path[1] for path in nx_network.graph['shortest_paths'].values()])
+    else:
+        # Return the diameter in hops
+        return max([path[2] for path in nx_network.graph['shortest_paths'].values()])
 
 
 def shortest_paths(networkx_network):
@@ -142,13 +146,15 @@ def shortest_paths(networkx_network):
     for source, v in all_pair_shortest_paths.items():
         for destination, shortest_path_list in v.items():
             path_delay = 0
+            hop_count = 0
             # only if the source and destination are different, path_delays need to be calculated, otherwise 0
             if source != destination:
                 # shortest_path_list only contains ordered nodes [node1,node2,node3....] in the shortest path
                 # here we take ordered pair of nodes (src, dest) to cal. the path_delay of the edge between them
                 for i in range(len(shortest_path_list) - 1):
                     path_delay += networkx_network[shortest_path_list[i]][shortest_path_list[i + 1]]['delay']
-            shortest_paths_with_delays[(source, destination)] = (shortest_path_list, path_delay)
+                    hop_count += 1
+            shortest_paths_with_delays[(source, destination)] = (shortest_path_list, path_delay, hop_count)
     networkx_network.graph['shortest_paths'] = shortest_paths_with_delays
 
 
