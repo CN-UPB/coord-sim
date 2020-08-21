@@ -44,7 +44,7 @@ class SimulatorParams:
         for node_id, placed_sf_list in sf_placement.items():
             for sf in placed_sf_list:
                 self.network.nodes[node_id]['available_sf'][sf] = self.network.nodes[node_id]['available_sf'].get(sf, {
-                    'load': 0.0})
+                    'load': 0.0, 'last_active': 0.0})
 
         # Flow data rate normal distribution mean: float
         self.flow_dr_mean = config['flow_dr_mean']
@@ -70,6 +70,9 @@ class SimulatorParams:
         # also allow to set determinism for inter-arrival times and flow size separately
         # The duration of a run in the simulator's interface
         self.run_duration = config['run_duration']
+
+        # VNF Timeout: How much time to allow a VNF to be inactive before removing it
+        self.vnf_timeout = config['vnf_timeout']
 
         self.use_states = False
         self.states = {}
