@@ -22,8 +22,7 @@ class FlowSimulator:
         self.env = env
         self.params = params
         self.total_flow_count = 0
-        # Create triggers for the first 20 flows, flows add it themselves afterwards
-        # self.flow_triggers = {f"{i}": self.env.event() for i in range(1, 20)}
+        # Blank event trigger for the simulator
         self.flow_trigger = self.env.event()
 
     def start(self):
@@ -132,14 +131,7 @@ class FlowSimulator:
 
         # If request decision is True, trigger the event
         if request_decision:
-            # Create an event trigger for the flow
-            # If it does not exist, create it
-            # if flow.flow_id not in self.flow_triggers:
-                # self.flow_triggers[flow.flow_id] = self.env.event()
-
-            # Trigger then reset
-            # self.flow_triggers[flow.flow_id].succeed(value=(flow, sfc))
-            # self.flow_triggers[flow.flow_id] = self.env.event()
+            # Trigger an event to stop the simulator run
             self.flow_trigger.succeed(value=(flow, sfc))
             self.flow_trigger = self.env.event()
             return
