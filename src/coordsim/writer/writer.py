@@ -19,11 +19,8 @@ class ResultWriter():
         """
         self.last_recording_time = 0
         self.recording_spacings = recording_spacings
-        self.write_schedule = False
         self.test_mode = test_mode
         if self.test_mode:
-            if self.write_schedule:
-                self.scheduling_file_name = f"{test_dir}/scheduling.csv"
             self.placement_file_name = f"{test_dir}/placements.csv"
             self.resources_file_name = f"{test_dir}/node_metrics.csv"
             self.metrics_file_name = f"{test_dir}/metrics.csv"
@@ -40,9 +37,6 @@ class ResultWriter():
             self.rl_state_stream = open(self.rl_state_file_name, 'a+', newline='')
             self.run_flows_stream = open(self.run_flows_file_name, 'a+', newline='')
 
-            if self.write_schedule:
-                self.scheduleing_stream = open(self.scheduling_file_name, 'a+', newline='')
-                self.scheduling_writer = csv.writer(self.scheduleing_stream)
             # Create CSV writers
             self.placement_writer = csv.writer(self.placement_stream)
             self.resources_writer = csv.writer(self.resources_stream)
@@ -57,8 +51,6 @@ class ResultWriter():
         # Close all writer streams
         if self.test_mode:
             self.placement_stream.close()
-            if self.write_schedule:
-                self.scheduleing_stream.close()
             self.resources_stream.close()
             self.metrics_stream.close()
             self.rl_state_stream.close()
@@ -70,9 +62,6 @@ class ResultWriter():
         """
 
         # Create CSV headers
-        if self.write_schedule:
-            scheduling_output_header = ['episode', 'time', 'origin_node', 'sfc', 'sf', 'schedule_node', 'schedule_prob']
-            self.scheduling_writer.writerow(scheduling_output_header)
         placement_output_header = ['episode', 'time', 'node', 'sf']
         resources_output_header = ['episode', 'time', 'node', 'node_capacity', 'used_resources', 'ingress_traffic']
         metrics_output_header = ['episode', 'time', 'total_flows', 'successful_flows', 'dropped_flows',
