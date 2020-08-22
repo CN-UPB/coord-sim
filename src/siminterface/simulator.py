@@ -10,8 +10,8 @@ from coordsim.simulation.simulatorparams import SimulatorParams
 import numpy
 import simpy
 from spinterface import SimulatorInterface
-from spr_rl.sprinterface.action import SPRAction
-from spr_rl.sprinterface.state import SPRState
+from sprinterface.action import SPRAction
+from sprinterface.state import SPRState
 from coordsim.writer.writer import ResultWriter
 from coordsim.trace_processor.trace_processor import TraceProcessor
 from coordsim.traffic_predictor.traffic_predictor import TrafficPredictor

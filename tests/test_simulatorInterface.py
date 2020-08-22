@@ -5,8 +5,8 @@ Simulator interface tests
 from unittest import TestCase
 
 from spinterface import SimulatorInterface
-from spr_rl.sprinterface.action import SPRAction
-from spr_rl.sprinterface.state import SPRState
+from sprinterface.action import SPRAction
+from sprinterface.state import SPRState
 from coordsim.network.flow import Flow
 from siminterface import Simulator
 
