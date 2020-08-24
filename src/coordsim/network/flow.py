@@ -28,6 +28,8 @@ class Flow:
         self.ingress_node_id = current_node_id
         # The specified egress node of the flow. The flow will depart at the egress node. Might be non-existent.
         self.egress_node_id = egress_node_id
+        # The last node the flow was in. Init with current_node_id
+        self.last_node_id = current_node_id
         # The duration of the flow calculated in ms.
         self.duration = (float(size) / float(dr)) * 1000  # Converted flow duration to ms
         # Current flow position within the SFC
@@ -38,3 +40,5 @@ class Flow:
         self.creation_time = creation_time
         # Flow Time-To-Live (in ms)
         self.ttl = ttl
+        # Flag to forward to egress (done processing)
+        self.forward_to_eg = False
