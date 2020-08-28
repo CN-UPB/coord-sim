@@ -120,6 +120,9 @@ class FlowSimulator:
         instead of pass_flow(). The position of the flow within the SFC is determined using current_position
         attribute of the flow object.
         """
+
+        # TODO: Check if another flow is requesting decisions, then wait some backoff time.  
+
         # Check if TTL is above zero to make sure flow is still relevant
         if flow.ttl <= 0:
             log.info(f"Flow {flow.flow_id} passed TTL! Dropping flow")
@@ -129,12 +132,11 @@ class FlowSimulator:
             return
 
         # set current sf of flow
+        # Only update flow's SF when not going to egress
         if not flow.forward_to_eg:
             # We only care to set SF if flow needs one. If forward_to_eg, flow finished processing
             sf = sfc[flow.current_position]
             flow.current_sf = sf
-        else:
-            flow.current_sf = None
 
         if flow.forward_to_eg and flow.current_node_id == flow.egress_node_id:
             # We are in an egress node, no need for further decisions
@@ -145,6 +147,12 @@ class FlowSimulator:
             # Depart network
             self.depart_flow(flow, remove_active_flow=False)
             return
+
+        if flow.forward_to_eg and flow.current_node_id == next_node:
+            # If flow finished processing and decision is to keep at the same node: +1 delay
+            yield self.env.timeout(1)
+            flow.ttl -= 1
+            flow.end2end_delay += 1
 
         # If request decision is True, trigger the event
         if request_decision:
@@ -180,27 +188,31 @@ class FlowSimulator:
             # Decision is to forward flow to another node
 
             # Forward flow to that node
-            yield self.env.process(self.forward_flow(flow, next_node))
+            flow_forwarded = yield self.env.process(self.forward_flow(flow, next_node))
 
             # TODO: CHECK IF FLOW OCCUPIED PREVIOUS LINK BUT DID NOT PROCESS AT A NODE
             # IF SO, LINK MUST BE CLEANED
             # IDEA: REMOVE LINK CAP UPDATE FROM PROCESS_FLOW AND PUT IT IN A SIMPY PROCESS
-
-            # Ask for decision again after arriving at the next node
-            # if done processing and forwarding to egress, set that flag
-            yield self.env.process(self.pass_flow(flow, sfc))
+            if flow_forwarded:
+                # Ask for decision again after arriving at the next node
+                # if done processing and forwarding to egress, set that flag
+                yield self.env.process(self.pass_flow(flow, sfc))
 
     def forward_flow(self, flow, next_node):
         """
         Calculates the path delays occurring when forwarding a node
         Path delays are calculated using the Shortest path
         The delay is simulated by timing out for the delay amount of duration
+
+        Returns:
+        False if flow was not forwarded
+        True if flow was successfully forwarded
         """
         if next_node is None:
             log.info(f"No node to forward flow {flow.flow_id} to. Dropping it")
             # Update metrics for the dropped flow
             self.params.metrics.dropped_flow(flow)
-            return
+            return False
         flow.last_node_id = flow.current_node_id
         path_delay = 0
         if flow.current_node_id != next_node:
@@ -214,11 +226,11 @@ class FlowSimulator:
                 log.info(f"Flow {flow.flow_id} started travelling on edge ({flow.current_node_id}, {next_node})")
                 self.params.network.edges[(flow.current_node_id, next_node)]['remaining_cap'] = new_rem_cap
             else:
-                # Mpt enough capacity on the edge: drop the flow
+                # Not enough capacity on the edge: drop the flow
                 log.info(f"No cap on edge ({flow.current_node_id}, {next_node}) to handle {flow.flow_id}. Dropping it")
                 # Update metrics for the dropped flow
                 self.params.metrics.dropped_flow(flow)
-                return
+                return False
 
         # Metrics calculation for path delay. Flow's end2end delay is also incremented.
         self.params.metrics.add_path_delay(path_delay)
@@ -241,6 +253,7 @@ class FlowSimulator:
             last_node_id = flow.last_node_id
             # create a non-blocking simpy process to cleanup after flow finishes arriving to this node
             self.env.process(self.cleanup_link_after_arrival(flow, last_node_id, current_node_id))
+            return True
 
     def cleanup_link_after_arrival(self, flow, last_node_id, current_node_id):
         """
@@ -267,8 +280,8 @@ class FlowSimulator:
 
         if sf in self.params.sf_placement[current_node_id]:
             current_sf = flow.current_sf
-            vnf_delay_mean = self.params.sf_list[flow.current_sf]["processing_delay_mean"]
-            vnf_delay_stdev = self.params.sf_list[flow.current_sf]["processing_delay_stdev"]
+            vnf_delay_mean = self.params.sf_list[current_sf]["processing_delay_mean"]
+            vnf_delay_stdev = self.params.sf_list[current_sf]["processing_delay_stdev"]
             processing_delay = np.absolute(np.random.normal(vnf_delay_mean, vnf_delay_stdev))
             # Update metrics for the processing delay
             # Add the delay to the flow's end2end delay
