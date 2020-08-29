@@ -1,5 +1,6 @@
 import logging
 import random
+import simpy
 import numpy as np
 from coordsim.network.flow import Flow
 # from coordsim.metrics import metrics
@@ -121,7 +122,22 @@ class FlowSimulator:
         attribute of the flow object.
         """
 
-        # TODO: Check if another flow is requesting decisions, then wait some backoff time.  
+        # The following is to check for scheduling conflicts that cause some flows to be ignored
+        # Step 1: Check events happening at this time
+        # Step 2: Check if any are of type Event()
+        # Step 3: If it is, it means there is a scheduling conflict.
+        #         Wait a random time between 0 and 1, start another simpy process and exit this one.
+
+        events_list = self.env._queue
+        events_now = [event for event in events_list if event[0] == self.env.now]
+        for event in events_now:
+            event_object = event[-1]
+            if isinstance(event_object, simpy.events.Event) and event_object.value is not None:
+                # There is a scheduling conflict, wait a backoff time (between 0 and 1) and restart
+                backoff_time = random.random()
+                yield self.env.timeout(backoff_time)
+                self.env.process(self.pass_flow(flow, sfc))
+                return
 
         # Check if TTL is above zero to make sure flow is still relevant
         if flow.ttl <= 0:
