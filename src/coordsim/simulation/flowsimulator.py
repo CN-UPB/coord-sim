@@ -156,6 +156,8 @@ class FlowSimulator:
 
         if flow.forward_to_eg and flow.current_node_id == flow.egress_node_id:
             # We are in an egress node, no need for further decisions
+            # Set flow as successful
+            flow.success = True
             # Wait flow duration
             yield self.env.timeout(flow.duration)
             # # Flow finished arriving: update link capacities
@@ -260,10 +262,10 @@ class FlowSimulator:
         else:
             log.info("Flow {} will leave node {} towards node {}. Time {}"
                      .format(flow.flow_id, flow.current_node_id, next_node, self.env.now))
-            # Wait for the path delay to reach the next node
-            yield self.env.timeout(path_delay)
             # Update the current node of the flow
             flow.current_node_id = next_node
+            # Wait for the path delay to reach the next node
+            yield self.env.timeout(path_delay)
             # Store a copy of current and past node ids
             current_node_id = flow.current_node_id
             last_node_id = flow.last_node_id
@@ -299,12 +301,6 @@ class FlowSimulator:
             vnf_delay_mean = self.params.sf_list[current_sf]["processing_delay_mean"]
             vnf_delay_stdev = self.params.sf_list[current_sf]["processing_delay_stdev"]
             processing_delay = np.absolute(np.random.normal(vnf_delay_mean, vnf_delay_stdev))
-            # Update metrics for the processing delay
-            # Add the delay to the flow's end2end delay
-            self.params.metrics.add_processing_delay(processing_delay)
-            flow.end2end_delay += processing_delay
-            # Deduct processing delay from flow TTL
-            flow.ttl -= processing_delay
 
             # Calculate the demanded capacity when the flow is processed at this node
             demanded_total_capacity = 0.0
@@ -322,6 +318,16 @@ class FlowSimulator:
             if demanded_total_capacity <= node_cap:
                 log.info("Flow {} started processing at sf {} at node {}. Time: {}, Processing delay: {}"
                          .format(flow.flow_id, current_sf, current_node_id, self.env.now, processing_delay))
+
+                # Update processing level of flow
+                flow.processing_index += 1
+
+                # Update metrics for the processing delay
+                # Add the delay to the flow's end2end delay only when enough capacity is there
+                self.params.metrics.add_processing_delay(processing_delay)
+                flow.end2end_delay += processing_delay
+                # Deduct processing delay from flow TTL
+                flow.ttl -= processing_delay
 
                 # Metrics: Add active flow to the SF once the flow has begun processing.
                 self.params.metrics.add_active_flow(flow, current_node_id, current_sf)
@@ -349,11 +355,15 @@ class FlowSimulator:
                     # Still increase position by 1 to indicate fully processed in passed state
                     flow.current_position += 1
                     if flow.current_node_id == flow.egress_node_id:
+                        # Trigger the flow success flag
+                        flow.success = True
                         # Flow is processed and resides at egress node: depart flow
                         yield self.env.timeout(flow.duration)
                         self.depart_flow(flow)
                     elif flow.egress_node_id is None:
                         # Flow is processed and no egress node specified: depart flow
+                        # Trigger flow success
+                        flow.success = True
                         log.info(f'Flow {flow.flow_id} has no egress node, will depart from'
                                  f' current node {flow.current_node_id}. Time {self.env.now}.')
                         yield self.env.timeout(flow.duration)

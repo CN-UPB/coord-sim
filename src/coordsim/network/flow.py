@@ -10,7 +10,7 @@ TODO: Add get/set methods
 class Flow:
 
     def __init__(self, flow_id, sfc, dr, size, creation_time, destination=None, egress_node_id=None, current_sf=None,
-                 current_node_id=None, current_position=0, end2end_delay=0.0, ttl=50):
+                 current_node_id=None, current_position=0, end2end_delay=0.0, ttl=30):
 
         # Flow ID: Unique ID string
         self.flow_id = flow_id
@@ -42,3 +42,9 @@ class Flow:
         self.ttl = ttl
         # Flag to forward to egress (done processing)
         self.forward_to_eg = False
+        # Success Flag
+        self.success = False
+        # Processing index
+        self.processing_index = 0
+        # Flow dropped flag
+        self.dropped = False
