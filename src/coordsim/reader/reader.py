@@ -196,6 +196,7 @@ def read_network(file, node_cap=None, link_cap=None):
         source = "pop{}".format(e[0])
         target = "pop{}".format(e[1])
         link_delay = e[2].get("LinkDelay", None)
+        link_status = e[2].get("LinkStatus", "active")
         # As edges are undirectional, only LinkFwdCap determines the available data rate
         link_fwd_cap = e[2].get("LinkFwdCap", link_cap)
         if e[2].get("LinkFwdCap") is None:
@@ -220,7 +221,8 @@ def read_network(file, node_cap=None, link_cap=None):
 
         # Adding the undirected edges for each link defined in the network.
         # delay = edge delay , cap = edge capacity
-        networkx_network.add_edge(source, target, delay=delay, cap=link_fwd_cap, remaining_cap=link_fwd_cap)
+        networkx_network.add_edge(source, target, delay=delay, cap=link_fwd_cap, remaining_cap=link_fwd_cap,
+                                  link_status=link_status)
 
     # setting the weight property for each edge in the NetworkX Graph
     # weight attribute is used to find the shortest paths
