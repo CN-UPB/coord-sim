@@ -159,6 +159,8 @@ class Simulator(SimulatorInterface):
         # reset metrics for steps
         self.params.metrics.reset_run_metrics()
 
+        # write action results
+        self.writer.write_action_result(self.episode, self.env.now, actions, self.simulator.params.network)
         flow = actions.flow
         currrent_node = flow.current_node_id
         current_sf = flow.current_sf
