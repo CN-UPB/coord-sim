@@ -234,18 +234,27 @@ class FlowSimulator:
         flow.last_node_id = flow.current_node_id
         path_delay = 0
         if flow.current_node_id != next_node:
-            path_delay = self.params.network.graph['shortest_paths'][(flow.current_node_id, next_node)][1]
-            # Get edges resources
-            edge_rem_cap = self.params.network.edges[(flow.current_node_id, next_node)]['remaining_cap']
-            # calculate new remaining cap
-            new_rem_cap = edge_rem_cap - flow.dr
-            if new_rem_cap >= 0:
-                # There is enoough capacity on the edge: send the flow
-                log.info(f"Flow {flow.flow_id} started travelling on edge ({flow.current_node_id}, {next_node})")
-                self.params.network.edges[(flow.current_node_id, next_node)]['remaining_cap'] = new_rem_cap
+            # only forward if link is active
+            link_status = self.params.network.edges[(flow.current_node_id, next_node)]['link_status']
+            if link_status == "active":
+                path_delay = self.params.network.graph['shortest_paths'][(flow.current_node_id, next_node)][1]
+                # Get edges resources
+                edge_rem_cap = self.params.network.edges[(flow.current_node_id, next_node)]['remaining_cap']
+                # calculate new remaining cap
+                new_rem_cap = edge_rem_cap - flow.dr
+                if new_rem_cap >= 0:
+                    # There is enoough capacity on the edge: send the flow
+                    log.info(f"Flow {flow.flow_id} started travelling on edge ({flow.current_node_id}, {next_node})")
+                    self.params.network.edges[(flow.current_node_id, next_node)]['remaining_cap'] = new_rem_cap
+                else:
+                    # Not enough capacity on the edge: drop the flow
+                    log.info(f"No cap on edge ({flow.current_node_id}, {next_node}) to handle {flow.flow_id}. Dropping it")
+                    # Update metrics for the dropped flow
+                    self.params.metrics.dropped_flow(flow)
+                    return False
             else:
-                # Not enough capacity on the edge: drop the flow
-                log.info(f"No cap on edge ({flow.current_node_id}, {next_node}) to handle {flow.flow_id}. Dropping it")
+                # Link not active
+                log.info(f"Link ({flow.current_node_id}, {next_node}) not active to forward {flow.flow_id}. Dropping it")
                 # Update metrics for the dropped flow
                 self.params.metrics.dropped_flow(flow)
                 return False
