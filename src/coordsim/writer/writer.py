@@ -73,7 +73,8 @@ class ResultWriter():
                                  'in_network_flows', 'avg_end2end_delay']
         run_flows_output_header = ['episode', 'time', 'successful_flows', 'dropped_flows', 'total_flows']
         flow_action_output_header = ['episode', 'time', 'flow_id',
-                                     'curr_node_id', 'dest_node', 'cur_node_rem_cap', 'next_node_rem_cap']
+                                     'curr_node_id', 'dest_node', 'cur_node_rem_cap', 'next_node_rem_cap',
+                                     'link_cap', 'link_rem_cap']
 
         # Write headers to CSV files
         self.placement_writer.writerow(placement_output_header)
@@ -114,12 +115,21 @@ class ResultWriter():
             if action.destination_node_id is None:
                 dest_node = 'None'
                 next_node_rem_cap = -1
+                link_cap = -1
+                rem_cap = -1
             else:
                 dest_node = action.destination_node_id
                 next_node_rem_cap = network.nodes[dest_node]['remaining_cap']
+                if dest_node == action.flow.current_node_id:
+                    link_cap = 'inf'
+                    rem_cap = 'inf'
+                else:
+                    link_cap = network.edges[(action.flow.current_node_id, dest_node)]['cap']
+                    rem_cap = network.edges[(action.flow.current_node_id, dest_node)]['cap']
 
             flow_action_output = [episode, time, action.flow.flow_id,
-                                  action.flow.current_node_id, dest_node, cur_node_rem_cap, next_node_rem_cap]
+                                  action.flow.current_node_id, dest_node, cur_node_rem_cap, next_node_rem_cap,
+                                  link_cap, rem_cap]
             self.flow_action_writer.writerow(flow_action_output)
 
     def write_state_results(self, episode, time, state: SimulatorState, metrics):
