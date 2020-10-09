@@ -168,6 +168,14 @@ class ResultWriter():
             self.run_flows_writer.writerow(run_flows_output)
             self.metrics_writer.writerow(metrics_output)
             self.resources_writer.writerows(resource_output)
+            # Write placement
+            placement_output = []
+            for node in network.nodes(data=True):
+                node_id = node[0]
+                for sf in node[1]['available_sf']:
+                    placement_output_row = [episode, time, node_id, sf]
+                    placement_output.append(placement_output_row)
+            self.placement_writer.writerows(placement_output)
 
     def write_dropped_flow_locs(self, dropped_flow_locs):
         """Dump dropped flow counters into yaml file. Called at end of simulation"""
