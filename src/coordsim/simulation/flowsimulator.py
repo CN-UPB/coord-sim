@@ -76,8 +76,12 @@ class FlowSimulator:
             if self.params.eg_nodes:
                 flow_egress_node = random.choice(self.params.eg_nodes)
             # Generate flow based on given params
+            if node_id == "pop3":
+                ttl = 50
+            else:
+                ttl = 50
             flow = Flow(str(self.total_flow_count), flow_sfc, flow_dr, flow_size, creation_time,
-                        current_node_id=node_id, egress_node_id=flow_egress_node)
+                        current_node_id=node_id, egress_node_id=flow_egress_node, ttl=ttl)
             # Update metrics for the generated flow
             self.params.metrics.generated_flow(flow, node_id)
             # Generate flows and schedule them at ingress node
@@ -134,7 +138,7 @@ class FlowSimulator:
             event_object = event[-1]
             if isinstance(event_object, simpy.events.Event) and event_object.value is not None:
                 # There is a scheduling conflict, wait a backoff time (between 0 and 1) and restart
-                backoff_time = random.random()
+                backoff_time = random.random()/10
                 yield self.env.timeout(backoff_time)
                 self.env.process(self.pass_flow(flow, sfc))
                 return
@@ -245,16 +249,18 @@ class FlowSimulator:
                 if new_rem_cap >= 0:
                     # There is enoough capacity on the edge: send the flow
                     log.info(f"Flow {flow.flow_id} started travelling on edge ({flow.current_node_id}, {next_node})")
-                    self.params.network.edges[(flow.current_node_id, next_node)]['remaining_cap'] = new_rem_cap
+                    self.params.network.edges[(flow.current_node_id, next_node)]['remaining_cap'] -= flow.dr
                 else:
                     # Not enough capacity on the edge: drop the flow
-                    log.info(f"No cap on edge ({flow.current_node_id}, {next_node}) to handle {flow.flow_id}. Dropping it")
+                    log.info(f"No cap on edge ({flow.current_node_id}, {next_node}) to handle {flow.flow_id}.\
+                    Dropping it")
                     # Update metrics for the dropped flow
                     self.params.metrics.dropped_flow(flow)
                     return False
             else:
                 # Link not active
-                log.info(f"Link ({flow.current_node_id}, {next_node}) not active to forward {flow.flow_id}. Dropping it")
+                log.info(f"Link ({flow.current_node_id}, {next_node}) not active to forward {flow.flow_id}.\
+                    Dropping it")
                 # Update metrics for the dropped flow
                 self.params.metrics.dropped_flow(flow)
                 return False

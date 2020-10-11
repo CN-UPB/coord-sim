@@ -5,7 +5,7 @@ Simulator file writer module
 import csv
 import os
 import yaml
-from spinterface import SimulatorAction, SimulatorState
+from spinterface import SimulatorState
 from sprinterface.action import SPRAction
 
 
@@ -125,7 +125,7 @@ class ResultWriter():
                     rem_cap = 'inf'
                 else:
                     link_cap = network.edges[(action.flow.current_node_id, dest_node)]['cap']
-                    rem_cap = network.edges[(action.flow.current_node_id, dest_node)]['cap']
+                    rem_cap = network.edges[(action.flow.current_node_id, dest_node)]['remaining_cap']
 
             flow_action_output = [episode, time, action.flow.flow_id,
                                   action.flow.current_node_id, dest_node, cur_node_rem_cap, next_node_rem_cap,
