@@ -356,6 +356,17 @@ class FlowSimulator:
                 # Just for the sake of keeping lines small, the node_remaining_cap is updated again.
                 node_remaining_cap = self.params.network.nodes[current_node_id]["remaining_cap"]
 
+                # Check if startup is done
+                startup_time = self.params.network.nodes[current_node_id]['available_sf'][current_sf]['startup_time']
+                startup_delay = self.params.sf_list[current_sf]["startup_delay"]
+                startup_done = True if (startup_time + startup_delay) <= self.env.now else False
+                if not startup_done:
+                    # Startup is not done: wait the remaining startup time
+                    startup_time_remaining = (startup_time + startup_delay) - self.env.now
+                    flow.end2end_delay += startup_time_remaining
+                    flow.ttl -= startup_time_remaining
+                    yield self.env.timeout(startup_time_remaining)
+
                 # Wait for the VNF to finish processing the head of the flow
                 yield self.env.timeout(processing_delay)
                 log.info("Flow {} started departing sf {} at node {}. Time {}"

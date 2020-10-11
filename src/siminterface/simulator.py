@@ -172,13 +172,14 @@ class Simulator(SimulatorInterface):
                 # If no instance exists: place instance in the node
                 self.simulator.params.network.nodes[currrent_node]['available_sf'][current_sf] = {
                     'load': 0.0,
-                    'last_active': self.simulator.env.now
+                    'last_active': self.simulator.env.now,
+                    'startup_time': self.simulator.env.now
                 }
 
         # Check active VNFs in the network
         self.update_vnf_active_status()
 
-        # Create a pla
+        # Create a placement
         sf_placement = {}
         for node in self.simulator.params.network.nodes(data=True):
             node_id = node[0]
