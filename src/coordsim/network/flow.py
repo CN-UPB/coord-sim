@@ -40,6 +40,7 @@ class Flow:
         self.creation_time = creation_time
         # Flow Time-To-Live (in ms)
         self.ttl = ttl
+        self.original_ttl = ttl
         # Flag to forward to egress (done processing)
         self.forward_to_eg = False
         # Success Flag
