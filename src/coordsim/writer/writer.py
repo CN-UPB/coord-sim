@@ -72,7 +72,7 @@ class ResultWriter():
         metrics_output_header = ['episode', 'time', 'total_flows', 'successful_flows', 'dropped_flows',
                                  'in_network_flows', 'avg_end2end_delay']
         run_flows_output_header = ['episode', 'time', 'successful_flows', 'dropped_flows', 'total_flows']
-        flow_action_output_header = ['episode', 'time', 'flow_id',
+        flow_action_output_header = ['episode', 'time', 'flow_id', 'flow_rem_ttl', 'flow_ttl',
                                      'curr_node_id', 'dest_node', 'cur_node_rem_cap', 'next_node_rem_cap',
                                      'link_cap', 'link_rem_cap']
 
@@ -127,7 +127,7 @@ class ResultWriter():
                     link_cap = network.edges[(action.flow.current_node_id, dest_node)]['cap']
                     rem_cap = network.edges[(action.flow.current_node_id, dest_node)]['remaining_cap']
 
-            flow_action_output = [episode, time, action.flow.flow_id,
+            flow_action_output = [episode, time, action.flow.flow_id, action.flow.ttl, action.flow.original_ttl,
                                   action.flow.current_node_id, dest_node, cur_node_rem_cap, next_node_rem_cap,
                                   link_cap, rem_cap]
             self.flow_action_writer.writerow(flow_action_output)
