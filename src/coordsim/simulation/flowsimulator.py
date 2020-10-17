@@ -76,10 +76,7 @@ class FlowSimulator:
             if self.params.eg_nodes:
                 flow_egress_node = random.choice(self.params.eg_nodes)
             # Generate flow based on given params
-            if node_id == "pop3":
-                ttl = 50
-            else:
-                ttl = 50
+            ttl = random.choice(self.params.ttl_choices)
             flow = Flow(str(self.total_flow_count), flow_sfc, flow_dr, flow_size, creation_time,
                         current_node_id=node_id, egress_node_id=flow_egress_node, ttl=ttl)
             # Update metrics for the generated flow

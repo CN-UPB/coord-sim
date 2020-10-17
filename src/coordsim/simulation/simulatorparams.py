@@ -11,7 +11,7 @@ import random
 
 
 class SimulatorParams:
-    def __init__(self, network, ing_nodes, eg_nodes, sfc_list, sf_list, config, metrics, prediction=False,
+    def __init__(self, network, ing_nodes, eg_nodes, sfc_list, sf_list, config: dict, metrics, prediction=False,
                  schedule=None, sf_placement=None):
         # NetworkX network object: DiGraph
         self.network = network
@@ -73,6 +73,9 @@ class SimulatorParams:
 
         # VNF Timeout: How much time to allow a VNF to be inactive before removing it
         self.vnf_timeout = config['vnf_timeout']
+
+        # TTL choices: the list of TTLs to select for flows arriving at the network. default to 50 if not defined
+        self.ttl_choices = config.get('ttl_choices', [50])
 
         self.use_states = False
         self.states = {}
