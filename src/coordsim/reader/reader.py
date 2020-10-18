@@ -115,7 +115,7 @@ def weight(edge_cap, edge_delay):
         return math.inf
     elif edge_delay == 0:
         return 0
-    return 1 / (edge_cap + 1 / edge_delay)
+    return 1 / (edge_delay + 1 / edge_cap)
 
 
 def network_diameter(nx_network, diameter_type="delay"):
