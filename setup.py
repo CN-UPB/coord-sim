@@ -1,14 +1,14 @@
 from setuptools import setup, find_packages
 requirements = [
     'simpy>=4',
-    'networkx',
+    'networkx==2.4',
     'geopy',
     'pyyaml>=5.1',
-    'numpy==1.16.4',
+    'numpy<1.19',
     'common-utils',
     'sklearn',
     'pandas',
-    'tensorflow==1.14.0',
+    'tensorflow<2',
     'keras==2.2.5',
 ]
 

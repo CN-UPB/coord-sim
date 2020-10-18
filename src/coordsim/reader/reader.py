@@ -115,14 +115,18 @@ def weight(edge_cap, edge_delay):
         return math.inf
     elif edge_delay == 0:
         return 0
-    return 1 / (edge_cap + 1 / edge_delay)
+    return 1 / (edge_delay + 1 / edge_cap)
 
 
-def network_diameter(nx_network):
+def network_diameter(nx_network, diameter_type="delay"):
     """Return the network diameter, ie, delay of longest shortest path"""
     if 'shortest_paths' not in nx_network.graph:
         shortest_paths(nx_network)
-    return max([path[1] for path in nx_network.graph['shortest_paths'].values()])
+    if diameter_type == "delay":
+        return max([path[1] for path in nx_network.graph['shortest_paths'].values()])
+    else:
+        # Return the diameter in hops
+        return max([path[2] for path in nx_network.graph['shortest_paths'].values()])
 
 
 def shortest_paths(networkx_network):
@@ -142,13 +146,15 @@ def shortest_paths(networkx_network):
     for source, v in all_pair_shortest_paths.items():
         for destination, shortest_path_list in v.items():
             path_delay = 0
+            hop_count = 0
             # only if the source and destination are different, path_delays need to be calculated, otherwise 0
             if source != destination:
                 # shortest_path_list only contains ordered nodes [node1,node2,node3....] in the shortest path
                 # here we take ordered pair of nodes (src, dest) to cal. the path_delay of the edge between them
                 for i in range(len(shortest_path_list) - 1):
                     path_delay += networkx_network[shortest_path_list[i]][shortest_path_list[i + 1]]['delay']
-            shortest_paths_with_delays[(source, destination)] = (shortest_path_list, path_delay)
+                    hop_count += 1
+            shortest_paths_with_delays[(source, destination)] = (shortest_path_list, path_delay, hop_count)
     networkx_network.graph['shortest_paths'] = shortest_paths_with_delays
 
 
@@ -190,6 +196,7 @@ def read_network(file, node_cap=None, link_cap=None):
         source = "pop{}".format(e[0])
         target = "pop{}".format(e[1])
         link_delay = e[2].get("LinkDelay", None)
+        link_status = e[2].get("LinkStatus", "active")
         # As edges are undirectional, only LinkFwdCap determines the available data rate
         link_fwd_cap = e[2].get("LinkFwdCap", link_cap)
         if e[2].get("LinkFwdCap") is None:
@@ -214,7 +221,8 @@ def read_network(file, node_cap=None, link_cap=None):
 
         # Adding the undirected edges for each link defined in the network.
         # delay = edge delay , cap = edge capacity
-        networkx_network.add_edge(source, target, delay=delay, cap=link_fwd_cap, remaining_cap=link_fwd_cap)
+        networkx_network.add_edge(source, target, delay=delay, cap=link_fwd_cap, remaining_cap=link_fwd_cap,
+                                  link_status=link_status)
 
     # setting the weight property for each edge in the NetworkX Graph
     # weight attribute is used to find the shortest paths

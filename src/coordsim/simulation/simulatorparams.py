@@ -11,7 +11,7 @@ import random
 
 
 class SimulatorParams:
-    def __init__(self, network, ing_nodes, eg_nodes, sfc_list, sf_list, config, metrics, prediction=False,
+    def __init__(self, network, ing_nodes, eg_nodes, sfc_list, sf_list, config: dict, metrics, prediction=False,
                  schedule=None, sf_placement=None):
         # NetworkX network object: DiGraph
         self.network = network
@@ -44,7 +44,7 @@ class SimulatorParams:
         for node_id, placed_sf_list in sf_placement.items():
             for sf in placed_sf_list:
                 self.network.nodes[node_id]['available_sf'][sf] = self.network.nodes[node_id]['available_sf'].get(sf, {
-                    'load': 0.0})
+                    'load': 0.0, 'last_active': 0.0})
 
         # Flow data rate normal distribution mean: float
         self.flow_dr_mean = config['flow_dr_mean']
@@ -70,6 +70,12 @@ class SimulatorParams:
         # also allow to set determinism for inter-arrival times and flow size separately
         # The duration of a run in the simulator's interface
         self.run_duration = config['run_duration']
+
+        # VNF Timeout: How much time to allow a VNF to be inactive before removing it
+        self.vnf_timeout = config['vnf_timeout']
+
+        # TTL choices: the list of TTLs to select for flows arriving at the network. default to 50 if not defined
+        self.ttl_choices = config.get('ttl_choices', [50])
 
         self.use_states = False
         self.states = {}
@@ -166,30 +172,30 @@ class SimulatorParams:
             flow_sizes = []
             flow_drs = []
             # generate flows for time frame of num_steps
-            run_end = now + self.run_duration
+            # # run_end = now + self.run_duration
             # Check to see if next flow arrival is before end of run
-            while self.last_arrival_sum[ing] < run_end:
-                # extension for det, and MMPP
-                if self.deterministic_arrival:
-                    inter_arr_time = self.inter_arr_mean[ing]
-                else:
-                    inter_arr_time = random.expovariate(lambd=1.0/self.inter_arr_mean[ing])
-                # Generate flow dr
-                flow_dr = np.random.normal(self.flow_dr_mean, self.flow_dr_stdev)
-                # generate flow sizes
-                if self.deterministic_size:
-                    flow_size = self.flow_size_shape
-                else:
-                    # heavy-tail flow size
-                    flow_size = np.random.pareto(self.flow_size_shape) + 1
-                # Skip flows with negative flow_dr or flow_size values
-                if flow_dr < 0.00 or flow_size < 0.00:
-                    continue
+            # while self.last_arrival_sum[ing] < run_end:
+            # extension for det, and MMPP
+            if self.deterministic_arrival:
+                inter_arr_time = self.inter_arr_mean[ing]
+            else:
+                inter_arr_time = random.expovariate(lambd=1.0/self.inter_arr_mean[ing])
+            # Generate flow dr
+            flow_dr = np.random.normal(self.flow_dr_mean, self.flow_dr_stdev)
+            # generate flow sizes
+            if self.deterministic_size:
+                flow_size = self.flow_size_shape
+            else:
+                # heavy-tail flow size
+                flow_size = np.random.pareto(self.flow_size_shape) + 1
+            # Skip flows with negative flow_dr or flow_size values
+            if flow_dr < 0.00 or flow_size < 0.00:
+                continue
 
-                flow_arrival.append(inter_arr_time)
-                flow_sizes.append(flow_size)
-                flow_drs.append(flow_dr)
-                self.last_arrival_sum[ing] += inter_arr_time
+            flow_arrival.append(inter_arr_time)
+            flow_sizes.append(flow_size)
+            flow_drs.append(flow_dr)
+            self.last_arrival_sum[ing] += inter_arr_time
 
             # append to existing flow list. it continues to grow across runs within an episode
             self.flow_arrival_list[ing].extend(flow_arrival)
@@ -200,6 +206,11 @@ class SimulatorParams:
     def get_next_flow_data(self, ing):
         """Return next flow data for given ingress from list of generated arrival times."""
         idx = self.flow_list_idx[ing]
+        if not idx < len(self.flow_arrival_list[ing]):
+            # This is a dirty fix, generate 5 new flows everytime we need one.
+            for _ in range(5):
+                self.generate_flow_lists()
+
         assert idx < len(self.flow_arrival_list[ing])
         inter_arrival_time = self.flow_arrival_list[ing][idx]
         flow_dr = self.flow_dr_list[ing][idx]

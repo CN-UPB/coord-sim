@@ -1,5 +1,6 @@
 import logging
 import random
+import simpy
 import numpy as np
 from coordsim.network.flow import Flow
 # from coordsim.metrics import metrics
@@ -22,6 +23,8 @@ class FlowSimulator:
         self.env = env
         self.params = params
         self.total_flow_count = 0
+        # Blank event trigger for the simulator
+        self.flow_trigger = self.env.event()
 
     def start(self):
         """
@@ -45,8 +48,11 @@ class FlowSimulator:
             self.total_flow_count += 1
 
             if self.params.flow_list_idx is None:
-                # Poisson arrival -> exponential distributed inter-arrival time
-                inter_arr_time = random.expovariate(lambd=1.0/self.params.inter_arr_mean[node_id])
+                if self.params.deterministic_arrival:
+                    inter_arr_time = self.params.inter_arr_mean[node_id]
+                else:
+                    # Poisson arrival -> exponential distributed inter-arrival time
+                    inter_arr_time = random.expovariate(lambd=1.0/self.params.inter_arr_mean[node_id])
                 # set normally distributed flow data rate
                 flow_dr = np.random.normal(self.params.flow_dr_mean, self.params.flow_dr_stdev)
                 if self.params.deterministic_size:
@@ -70,8 +76,9 @@ class FlowSimulator:
             if self.params.eg_nodes:
                 flow_egress_node = random.choice(self.params.eg_nodes)
             # Generate flow based on given params
+            ttl = random.choice(self.params.ttl_choices)
             flow = Flow(str(self.total_flow_count), flow_sfc, flow_dr, flow_size, creation_time,
-                        current_node_id=node_id, egress_node_id=flow_egress_node)
+                        current_node_id=node_id, egress_node_id=flow_egress_node, ttl=ttl)
             # Update metrics for the generated flow
             self.params.metrics.generated_flow(flow, node_id)
             # Generate flows and schedule them at ingress node
@@ -98,11 +105,12 @@ class FlowSimulator:
             yield self.env.process(self.pass_flow(flow, sfc))
         else:
             log.info(f"Requested SFC was not found. Dropping flow {flow.flow_id}")
+            # del self.flow_triggers[flow.flow_id]
             # Update metrics for the dropped flow
             self.params.metrics.dropped_flow(flow)
             return
 
-    def pass_flow(self, flow, sfc):
+    def pass_flow(self, flow, sfc, request_decision=True, next_node=None):
         """
         Passes the flow to the next node to begin processing.
         The flow might still be arriving at a previous node or SF.
@@ -115,74 +123,177 @@ class FlowSimulator:
         attribute of the flow object.
         """
 
-        # set current sf of flow
-        sf = sfc[flow.current_position]
-        flow.current_sf = sf
-        self.params.metrics.add_requesting_flow(flow)
+        # The following is to check for scheduling conflicts that cause some flows to be ignored
+        # Step 1: Check events happening at this time
+        # Step 2: Check if any are of type Event()
+        # Step 3: If it is, it means there is a scheduling conflict.
+        #         Wait a random time between 0 and 1, start another simpy process and exit this one.
+        if request_decision:
+            events_list = self.env._queue
+            events_now = [event for event in events_list if event[0] == self.env.now]
+            for event in events_now:
+                event_object = event[-1]
+                if isinstance(event_object, simpy.events.Event) and event_object.value is not None:
+                    # There is a scheduling conflict, wait a backoff time (between 0 and 1) and restart
+                    backoff_time = random.random()/10
+                    yield self.env.timeout(backoff_time)
+                    self.env.process(self.pass_flow(flow, sfc))
+                    return
 
-        next_node = self.get_next_node(flow, sf)
-        yield self.env.process(self.forward_flow(flow, next_node))
-
-        log.info("Flow {} STARTED ARRIVING at node {} for processing. Time: {}"
-                 .format(flow.flow_id, flow.current_node_id, self.env.now))
-        yield self.env.process(self.process_flow(flow, sfc))
-
-    def get_next_node(self, flow, sf):
-        """
-        Get next node using weighted probabilites from the scheduler
-        """
-        schedule = self.params.schedule
-        # Check if scheduling rule exists
-        if (flow.current_node_id in schedule) and flow.sfc in schedule[flow.current_node_id]:
-            schedule_node = schedule[flow.current_node_id]
-            schedule_sf = schedule_node[flow.sfc][sf]
-            sf_nodes = [sch_sf for sch_sf in schedule_sf.keys()]
-            sf_probability = [prob for name, prob in schedule_sf.items()]
-            try:
-                next_node = np.random.choice(sf_nodes, p=sf_probability)
-                return next_node
-
-            except Exception as ex:
-
-                # Scheduling rule does not exist: drop flow
-                log.warning(f'Flow {flow.flow_id}: Scheduling rule at node {flow.current_node_id} not correct'
-                            f'Dropping flow!')
-                log.warning(ex)
-                self.params.metrics.dropped_flow(flow)
-                return
-        else:
-            # Scheduling rule does not exist: drop flow
-            log.warning(f'Flow {flow.flow_id}: Scheduling rule not found at {flow.current_node_id}. Dropping flow!')
+        # Check if TTL is above zero to make sure flow is still relevant
+        if flow.ttl <= 0:
+            log.info(f"Flow {flow.flow_id} passed TTL! Dropping flow")
+            # del self.flow_triggers[flow.flow_id]
+            # Update metrics for the dropped flow
             self.params.metrics.dropped_flow(flow)
             return
+
+        # set current sf of flow
+        # Only update flow's SF when not going to egress
+        if not flow.forward_to_eg:
+            # We only care to set SF if flow needs one. If forward_to_eg, flow finished processing
+            sf = sfc[flow.current_position]
+            flow.current_sf = sf
+
+        if flow.forward_to_eg and flow.current_node_id == flow.egress_node_id:
+            # We are in an egress node, no need for further decisions
+            # Set flow as successful
+            flow.success = True
+            # Wait flow duration
+            yield self.env.timeout(flow.duration)
+            # # Flow finished arriving: update link capacities
+            # self.update_link_cap(flow, flow.last_node_id, flow.current_node_id)
+            # Depart network
+            self.depart_flow(flow, remove_active_flow=False)
+            return
+
+        if flow.forward_to_eg and flow.current_node_id == next_node:
+            # If flow finished processing and decision is to keep at the same node: +1 delay
+            yield self.env.timeout(1)
+            flow.ttl -= 1
+            flow.end2end_delay += 1
+
+        # If request decision is True, trigger the event
+        if request_decision:
+            # Trigger an event to stop the simulator run
+            self.flow_trigger.succeed(value=(flow, sfc))
+            self.flow_trigger = self.env.event()
+            return
+
+        if next_node is None:
+            log.info(f"No node to forward flow {flow.flow_id} to. Dropping it")
+            # Update metrics for the dropped flow
+            # del self.flow_triggers[flow.flow_id]
+            self.params.metrics.dropped_flow(flow)
+            return
+
+        # Check if decision is to process at this node
+        if next_node == flow.current_node_id:
+
+            log.info("Flow {} STARTED ARRIVING at node {}. Time: {}"
+                     .format(flow.flow_id, flow.current_node_id, self.env.now))
+
+            # Only process at a node if not moving to egress
+            if not flow.forward_to_eg:
+                self.params.metrics.add_requesting_flow(flow)
+                yield self.env.process(self.process_flow(flow, sfc))
+
+            elif flow.forward_to_eg:
+                # we are not at egress, keep requesting decisions
+                # Pass the head of the flow
+                yield self.env.process(self.pass_flow(flow, sfc))
+
+        else:
+            # Decision is to forward flow to another node
+
+            # Forward flow to that node
+            flow_forwarded = yield self.env.process(self.forward_flow(flow, next_node))
+
+            # TODO: CHECK IF FLOW OCCUPIED PREVIOUS LINK BUT DID NOT PROCESS AT A NODE
+            # IF SO, LINK MUST BE CLEANED
+            # IDEA: REMOVE LINK CAP UPDATE FROM PROCESS_FLOW AND PUT IT IN A SIMPY PROCESS
+            if flow_forwarded:
+                # Ask for decision again after arriving at the next node
+                # if done processing and forwarding to egress, set that flag
+                yield self.env.process(self.pass_flow(flow, sfc))
 
     def forward_flow(self, flow, next_node):
         """
         Calculates the path delays occurring when forwarding a node
         Path delays are calculated using the Shortest path
         The delay is simulated by timing out for the delay amount of duration
+
+        Returns:
+        False if flow was not forwarded
+        True if flow was successfully forwarded
         """
         if next_node is None:
             log.info(f"No node to forward flow {flow.flow_id} to. Dropping it")
             # Update metrics for the dropped flow
             self.params.metrics.dropped_flow(flow)
-            return
-
+            return False
+        flow.last_node_id = flow.current_node_id
         path_delay = 0
         if flow.current_node_id != next_node:
-            path_delay = self.params.network.graph['shortest_paths'][(flow.current_node_id, next_node)][1]
+            # only forward if link is active
+            link_status = self.params.network.edges[(flow.current_node_id, next_node)]['link_status']
+            if link_status == "active":
+                path_delay = self.params.network.graph['shortest_paths'][(flow.current_node_id, next_node)][1]
+                # Get edges resources
+                edge_rem_cap = self.params.network.edges[(flow.current_node_id, next_node)]['remaining_cap']
+                # calculate new remaining cap
+                new_rem_cap = edge_rem_cap - flow.dr
+                if new_rem_cap >= 0:
+                    # There is enoough capacity on the edge: send the flow
+                    log.info(f"Flow {flow.flow_id} started travelling on edge ({flow.current_node_id}, {next_node})")
+                    self.params.network.edges[(flow.current_node_id, next_node)]['remaining_cap'] -= flow.dr
+                else:
+                    # Not enough capacity on the edge: drop the flow
+                    log.info(f"No cap on edge ({flow.current_node_id}, {next_node}) to handle {flow.flow_id}.\
+                    Dropping it")
+                    # Update metrics for the dropped flow
+                    self.params.metrics.dropped_flow(flow)
+                    return False
+            else:
+                # Link not active
+                log.info(f"Link ({flow.current_node_id}, {next_node}) not active to forward {flow.flow_id}.\
+                    Dropping it")
+                # Update metrics for the dropped flow
+                self.params.metrics.dropped_flow(flow)
+                return False
 
         # Metrics calculation for path delay. Flow's end2end delay is also incremented.
         self.params.metrics.add_path_delay(path_delay)
         flow.end2end_delay += path_delay
+        # deduct path_delay from TTL
+        flow.ttl -= path_delay
+
         if flow.current_node_id == next_node:
             assert path_delay == 0, "While Forwarding the flow, the Current and Next node same, yet path_delay != 0"
             log.info("Flow {} will stay in node {}. Time: {}.".format(flow.flow_id, flow.current_node_id, self.env.now))
         else:
             log.info("Flow {} will leave node {} towards node {}. Time {}"
                      .format(flow.flow_id, flow.current_node_id, next_node, self.env.now))
-            yield self.env.timeout(path_delay)
+            # Update the current node of the flow
             flow.current_node_id = next_node
+            # Wait for the path delay to reach the next node
+            yield self.env.timeout(path_delay)
+            # Store a copy of current and past node ids
+            current_node_id = flow.current_node_id
+            last_node_id = flow.last_node_id
+            # create a non-blocking simpy process to cleanup after flow finishes arriving to this node
+            self.env.process(self.cleanup_link_after_arrival(flow, last_node_id, current_node_id))
+            return True
+
+    def cleanup_link_after_arrival(self, flow, last_node_id, current_node_id):
+        """
+        Simpy process: wait flow.duration then cleanup link
+        Used only when flow is forwarding to egress node and no flow processing done
+        """
+        # Wait flow duration
+        yield self.env.timeout(flow.duration)
+        # Update link cap
+        self.update_link_cap(flow, last_node_id, current_node_id)
 
     def process_flow(self, flow, sfc):
         """
@@ -190,6 +301,7 @@ class FlowSimulator:
         """
         # Generate a processing delay for the SF
         current_node_id = flow.current_node_id
+        # last_node_id = flow.last_node_id
         sf = sfc[flow.current_position]
         flow.current_sf = sf
 
@@ -198,13 +310,9 @@ class FlowSimulator:
 
         if sf in self.params.sf_placement[current_node_id]:
             current_sf = flow.current_sf
-            vnf_delay_mean = self.params.sf_list[flow.current_sf]["processing_delay_mean"]
-            vnf_delay_stdev = self.params.sf_list[flow.current_sf]["processing_delay_stdev"]
+            vnf_delay_mean = self.params.sf_list[current_sf]["processing_delay_mean"]
+            vnf_delay_stdev = self.params.sf_list[current_sf]["processing_delay_stdev"]
             processing_delay = np.absolute(np.random.normal(vnf_delay_mean, vnf_delay_stdev))
-            # Update metrics for the processing delay
-            # Add the delay to the flow's end2end delay
-            self.params.metrics.add_processing_delay(processing_delay)
-            flow.end2end_delay += processing_delay
 
             # Calculate the demanded capacity when the flow is processed at this node
             demanded_total_capacity = 0.0
@@ -223,6 +331,16 @@ class FlowSimulator:
                 log.info("Flow {} started processing at sf {} at node {}. Time: {}, Processing delay: {}"
                          .format(flow.flow_id, current_sf, current_node_id, self.env.now, processing_delay))
 
+                # Update processing level of flow
+                flow.processing_index += 1
+
+                # Update metrics for the processing delay
+                # Add the delay to the flow's end2end delay only when enough capacity is there
+                self.params.metrics.add_processing_delay(processing_delay)
+                flow.end2end_delay += processing_delay
+                # Deduct processing delay from flow TTL
+                flow.ttl -= processing_delay
+
                 # Metrics: Add active flow to the SF once the flow has begun processing.
                 self.params.metrics.add_active_flow(flow, current_node_id, current_sf)
 
@@ -235,6 +353,18 @@ class FlowSimulator:
                 # Just for the sake of keeping lines small, the node_remaining_cap is updated again.
                 node_remaining_cap = self.params.network.nodes[current_node_id]["remaining_cap"]
 
+                # Check if startup is done
+                startup_time = self.params.network.nodes[current_node_id]['available_sf'][current_sf]['startup_time']
+                startup_delay = self.params.sf_list[current_sf]["startup_delay"]
+                startup_done = True if (startup_time + startup_delay) <= self.env.now else False
+                if not startup_done:
+                    # Startup is not done: wait the remaining startup time
+                    startup_time_remaining = (startup_time + startup_delay) - self.env.now
+                    flow.end2end_delay += startup_time_remaining
+                    flow.ttl -= startup_time_remaining
+                    yield self.env.timeout(startup_time_remaining)
+
+                # Wait for the VNF to finish processing the head of the flow
                 yield self.env.timeout(processing_delay)
                 log.info("Flow {} started departing sf {} at node {}. Time {}"
                          .format(flow.flow_id, current_sf, current_node_id, self.env.now))
@@ -245,12 +375,18 @@ class FlowSimulator:
                 #     the egress node using the shortest_path
 
                 if flow.current_position == len(sfc) - 1:
+                    # Still increase position by 1 to indicate fully processed in passed state
+                    flow.current_position += 1
                     if flow.current_node_id == flow.egress_node_id:
+                        # Trigger the flow success flag
+                        flow.success = True
                         # Flow is processed and resides at egress node: depart flow
                         yield self.env.timeout(flow.duration)
                         self.depart_flow(flow)
                     elif flow.egress_node_id is None:
                         # Flow is processed and no egress node specified: depart flow
+                        # Trigger flow success
+                        flow.success = True
                         log.info(f'Flow {flow.flow_id} has no egress node, will depart from'
                                  f' current node {flow.current_node_id}. Time {self.env.now}.')
                         yield self.env.timeout(flow.duration)
@@ -259,22 +395,30 @@ class FlowSimulator:
                         # Remove the active flow from the SF after it departed the SF on current node towards egress
                         self.params.metrics.remove_active_flow(flow, current_node_id, current_sf)
                         # Forward flow to the egress node and then depart from there
-                        yield self.env.process(self.forward_flow(flow, flow.egress_node_id))
-                        yield self.env.timeout(flow.duration)
+                        # yield self.env.process(self.forward_flow(flow, flow.egress_node_id))
+                        # Set flow flag to forward to egress
+                        flow.forward_to_eg = True
+                        # request decision to route to egress
+                        yield self.env.process(self.pass_flow(flow, flow.sfc))
+                        # yield self.env.timeout(flow.duration)
                         # In this situation the last sf was never active for the egress node,
                         # so we should not remove it from the metrics
-                        self.depart_flow(flow, remove_active_flow=False)
+                        # self.depart_flow(flow, remove_active_flow=False)
                 else:
                     # Increment the position of the flow within SFC
                     flow.current_position += 1
                     self.env.process(self.pass_flow(flow, sfc))
                     yield self.env.timeout(flow.duration)
+
                     # before departing the SF.
                     # print(metrics.get_metrics()['current_active_flows'])
                     log.info("Flow {} FINISHED ARRIVING at SF {} at node {} for processing. Time: {}"
                              .format(flow.flow_id, current_sf, current_node_id, self.env.now))
                     # Remove the active flow from the SF after it departed the SF
                     self.params.metrics.remove_active_flow(flow, current_node_id, current_sf)
+
+                # update link capacities
+                # self.update_link_cap(flow, last_node_id, current_node_id)
 
                 # Remove load from sf
                 self.params.network.nodes[current_node_id]['available_sf'][sf]['load'] -= flow.dr
@@ -300,11 +444,15 @@ class FlowSimulator:
                 assert node_remaining_cap <= node_cap, "Node remaining capacity cannot be more than node capacity!"
             else:
                 log.info(f"Not enough capacity for flow {flow.flow_id} at node {flow.current_node_id}. Dropping flow.")
+                # update link capacities
+                # self.update_link_cap(flow, last_node_id, current_node_id)
                 # Update metrics for the dropped flow
                 self.params.metrics.dropped_flow(flow)
                 return
         else:
             log.info(f"SF {sf} was not found at {current_node_id}. Dropping flow {flow.flow_id}")
+            # update link capacities
+            # self.update_link_cap(flow, last_node_id, current_node_id)
             self.params.metrics.dropped_flow(flow)
             return
 
@@ -312,6 +460,7 @@ class FlowSimulator:
         """
         Process the flow at the requested SF of the current node.
         """
+
         # Update metrics for the processed flow
         self.params.metrics.completed_flow()
         self.params.metrics.add_end2end_delay(flow.end2end_delay)
@@ -319,3 +468,11 @@ class FlowSimulator:
             self.params.metrics.remove_active_flow(flow, flow.current_node_id, flow.current_sf)
         log.info("Flow {} was processed and departed the network from {}. Time {}"
                  .format(flow.flow_id, flow.current_node_id, self.env.now))
+
+    def update_link_cap(self, flow, last_node_id, current_node_id):
+        # return the used capacity to the edge
+        # Add the used cap back to the edge
+        self.params.network.edges[(last_node_id, current_node_id)]['remaining_cap'] += flow.dr
+        remaining_edge_cap = self.params.network.edges[(last_node_id, current_node_id)]['remaining_cap']
+        edge_cap = self.params.network.edges[(last_node_id, current_node_id)]['cap']
+        assert remaining_edge_cap <= edge_cap, "Edge rem. cap can't be > actual cap"

@@ -29,7 +29,7 @@ class TraceProcessor():
         file does not start from 0, then the simulator will use the value set in sim_config
 
         """
-        self.timeout = float(self.trace[self.trace_index]['time']) - self.env.now - 1
+        self.timeout = float(self.trace[self.trace_index]['time']) - self.env.now
         self.timeout = np.clip(self.timeout, 0, None)
         inter_arrival_mean = self.trace[self.trace_index]['inter_arrival_mean']
         yield self.env.timeout(self.timeout)
@@ -40,12 +40,20 @@ class TraceProcessor():
                 self.params.inter_arr_mean[node_id] = None
             else:
                 inter_arrival_mean = float(inter_arrival_mean)
-                old_mean = self.params.inter_arr_mean[node_id]
+                old_mean = self.params.inter_arr_mean.get(node_id, -1)
                 self.params.inter_arr_mean[node_id] = inter_arrival_mean
                 # Check for changing capacities in the trace file. Currently limited to only increasing capacites.
                 if 'cap' in self.trace[self.trace_index]:
                     cap = self.trace[self.trace_index]["cap"]
                     self.params.network.nodes[node_id]["cap"] = float(cap)
+                    if 'edge' in self.trace[self.trace_index]:
+                        edge = self.trace[self.trace_index]['edge']
+                        if self.params.network.edges[(edge, node_id)]['link_status'] == "active":
+                            self.params.network.edges[(edge, node_id)]['link_status'] = "inactive"
+                        else:
+                            self.params.network.edges[(edge, node_id)]['link_status'] = "active"
+                        # self.params.network.edges[(edge_from, node_id)]['remaining_cap'] = edge_cap
+
                 if old_mean is None:
                     self.env.process(self.simulator.generate_flow(node_id))
         else:

@@ -9,7 +9,9 @@ from coordsim.simulation.flowsimulator import FlowSimulator
 from coordsim.simulation.simulatorparams import SimulatorParams
 import numpy
 import simpy
-from spinterface import SimulatorAction, SimulatorInterface, SimulatorState
+from spinterface import SimulatorInterface
+from sprinterface.action import SPRAction
+from sprinterface.state import SPRState
 from coordsim.writer.writer import ResultWriter
 from coordsim.trace_processor.trace_processor import TraceProcessor
 from coordsim.traffic_predictor.traffic_predictor import TrafficPredictor
@@ -49,7 +51,9 @@ class Simulator(SimulatorInterface):
         if 'write_schedule' in self.config and self.config['write_schedule']:
             write_schedule = True
         # Create CSV writer
-        self.writer = ResultWriter(self.test_mode, self.test_dir, write_schedule)
+        self.writer = ResultWriter(
+            self.test_mode, self.test_dir, write_schedule, recording_spacings=self.params.run_duration)
+
         self.episode = 0
         # Load trace file
         if 'trace_path' in self.config:
@@ -98,9 +102,10 @@ class Simulator(SimulatorInterface):
         random.seed(self.seed)
         numpy.random.seed(self.seed)
 
-        self.params.reset_flow_lists()
+        # TODO: Do not need flow arrival list
+        # self.params.reset_flow_lists()
         # generate flow lists 1x here since we are in `init()`
-        self.params.generate_flow_lists()
+        # self.params.generate_flow_lists()
 
         # Instantiate a simulator object, pass the environment and params
         self.simulator = FlowSimulator(self.env, self.params)
@@ -113,8 +118,14 @@ class Simulator(SimulatorInterface):
         self.simulator.start()
 
         # Run the environment for one step to get initial stats.
-        self.env.step()
-
+        # self.env.step()
+        # self.flow_trigger_list = list(self.simulator.flow_triggers.values())
+        # event_info = self.env.run(until=simpy.events.AnyOf(self.env, self.flow_trigger_list))
+        # # get the latest trigger list
+        # self.flow_trigger_list = list(self.simulator.flow_triggers.values())
+        # flow, sfc = event_info.events[0].value
+        # self.simulator.flow_triggers[flow.current_node_id] = self.env.event()
+        flow, sfc = self.env.run(until=self.simulator.flow_trigger)
         # Parse the NetworkX object into a dict format specified in SimulatorState. This is done to account
         # for changing node remaining capacities.
         # Also, parse the network stats and prepare it in SimulatorState format.
@@ -129,48 +140,62 @@ class Simulator(SimulatorInterface):
             self.predictor.predict_traffic(self.env.now)
             stats = self.params.metrics.get_metrics()
             self.traffic = stats['run_total_requested_traffic']
-        simulator_state = SimulatorState(self.network_dict, self.simulator.params.sf_placement, self.sfc_list,
-                                         self.sf_list, self.traffic, self.network_stats)
+        simulator_state = SPRState(
+            flow, self.simulator.params.network,
+            self.simulator.params.sf_placement,
+            self.sfc_list,
+            self.sf_list,
+            self.traffic,
+            self.network_stats
+        )
         logger.debug(f"t={self.env.now}: {simulator_state}")
         # Check to see if init called in warmup, if so, set warmup to false
         # This is to allow for better prediction and better overall control
         # in the future
         return simulator_state
 
-    def apply(self, actions: SimulatorAction):
-
-        self.writer.write_action_result(self.episode, self.env.now, actions)
-        logger.debug(f"t={self.env.now}: {actions}")
-
-        # Get the new placement from the action passed by the RL agent
-        # Modify and set the placement parameter of the instantiated simulator object.
-        self.simulator.params.sf_placement = actions.placement
-        # Update which sf is available at which node
-        for node_id, placed_sf_list in actions.placement.items():
-            available = {}
-            # Keep only SFs which still process
-            for sf, sf_data in self.simulator.params.network.nodes[node_id]['available_sf'].items():
-                if sf_data['load'] != 0:
-                    available[sf] = sf_data
-            # Add all SFs which are in the placement
-            for sf in placed_sf_list:
-                available[sf] = available.get(sf, {'load': 0.0})
-            self.simulator.params.network.nodes[node_id]['available_sf'] = available
-
-        # Get the new schedule from the SimulatorAction
-        # Set it in the params of the instantiated simulator object.
-        self.simulator.params.schedule = actions.scheduling
+    def apply(self, actions: SPRAction):
 
         # reset metrics for steps
         self.params.metrics.reset_run_metrics()
 
-        # Run the simulation again with the new params for the set duration.
-        # Due to SimPy restraints, we multiply the duration by the run times because SimPy does not reset when run()
-        # stops and we must increase the value of "until=" to accomodate for this. e.g.: 1st run call runs for 100 time
-        # uniits (1 run time), 2nd run call will also run for 100 more time units but value of "until=" is now 200.
-        runtime_steps = self.duration * self.run_times
-        logger.debug("Running simulator until time step %s", runtime_steps)
-        self.env.run(until=runtime_steps)
+        # write action results
+        self.writer.write_action_result(self.episode, self.env.now, actions, self.simulator.params.network)
+        flow = actions.flow
+        currrent_node = flow.current_node_id
+        current_sf = flow.current_sf
+        # Apply placement if decision is 0: process at this node and no instance is there
+        if actions.destination_node_id == flow.current_node_id:
+            # check if instance is already here
+            available_sf = self.simulator.params.network.nodes[flow.current_node_id]['available_sf']
+            if flow.current_sf not in list(available_sf.keys()):
+                # If no instance exists: place instance in the node
+                self.simulator.params.network.nodes[currrent_node]['available_sf'][current_sf] = {
+                    'load': 0.0,
+                    'last_active': self.simulator.env.now,
+                    'startup_time': self.simulator.env.now
+                }
+
+        # Check active VNFs in the network
+        self.update_vnf_active_status()
+
+        # Create a placement
+        sf_placement = {}
+        for node in self.simulator.params.network.nodes(data=True):
+            node_id = node[0]
+            node_available_sf = list(node[1]['available_sf'].keys())
+            sf_placement[node_id] = node_available_sf
+        self.simulator.params.sf_placement = sf_placement
+        self.env.process(
+            self.simulator.pass_flow(
+                flow, self.sfc_list[flow.sfc],
+                request_decision=False,
+                next_node=actions.destination_node_id
+            )
+        )
+
+        # Run the simulation again until a new flow decision request
+        flow, sfc = self.env.run(until=self.simulator.flow_trigger)
 
         # Parse the NetworkX object into a dict format specified in SimulatorState. This is done to account
         # for changing node remaining capacities.
@@ -188,8 +213,9 @@ class Simulator(SimulatorInterface):
 
         if self.params.use_states:
             self.params.update_state()
+
         # generate flow data for next run (used for prediction)
-        self.params.generate_flow_lists(now=self.env.now)
+        # self.params.generate_flow_lists(now=self.env.now)
 
         # Check to see if traffic prediction is enabled to provide future traffic not current traffic
         if self.prediction:
@@ -197,8 +223,15 @@ class Simulator(SimulatorInterface):
             stats = self.params.metrics.get_metrics()
             self.traffic = stats['run_total_requested_traffic']
         # Create a new SimulatorState object to pass to the RL Agent
-        simulator_state = SimulatorState(self.network_dict, self.simulator.params.sf_placement, self.sfc_list,
-                                         self.sf_list, self.traffic, self.network_stats)
+        simulator_state = SPRState(
+            flow,
+            self.simulator.params.network,
+            self.simulator.params.sf_placement,
+            self.sfc_list,
+            self.sf_list,
+            self.traffic,
+            self.network_stats
+        )
         self.writer.write_state_results(self.episode, self.env.now, simulator_state, self.params.metrics.get_metrics())
         logger.debug(f"t={self.env.now}: {simulator_state}")
 
@@ -208,14 +241,13 @@ class Simulator(SimulatorInterface):
         """
         Converts the NetworkX network in the simulator to a dict in a format specified in the SimulatorState class.
         """
-        max_node_usage = self.params.metrics.get_metrics()['run_max_node_usage']
         self.network_dict = {'nodes': [], 'edges': []}
         for node in self.params.network.nodes(data=True):
             node_cap = node[1]['cap']
-            run_max_node_usage = max_node_usage[node[0]]
             # 'used_resources' here is the max usage for the run.
+            node_remaining_cap = node[1]['remaining_cap']
             self.network_dict['nodes'].append({'id': node[0], 'resource': node_cap,
-                                               'used_resources': run_max_node_usage})
+                                               'remaining_resource': node_remaining_cap})
         for edge in self.network.edges(data=True):
             edge_src = edge[0]
             edge_dest = edge[1]
@@ -250,12 +282,34 @@ class Simulator(SimulatorInterface):
             'run_max_end2end_delay': stats['run_max_end2end_delay'],
             'run_avg_path_delay': stats['run_avg_path_delay'],
             'run_total_processed_traffic': stats['run_total_processed_traffic'],
-            'run_dropped_flows_per_node': stats['run_dropped_flows_per_node']
+            'run_dropped_flows_per_node': stats['run_dropped_flows_per_node'],
+            'run_generated_flows': stats['run_generated_flows'],
+            'run_dropped_flows': stats['run_dropped_flows'],
+            'run_successful_flows': stats['run_processed_flows']
         }
 
     def get_active_ingress_nodes(self):
         """Return names of all ingress nodes that are currently active, ie, produce flows."""
         return [ing[0] for ing in self.ing_nodes if self.params.inter_arr_mean[ing[0]] is not None]
+
+    def update_vnf_active_status(self):
+        for node in self.network.nodes(data=True):
+            n_id = node[0]
+            now = self.simulator.env.now
+            timeout = self.params.vnf_timeout
+            # Using dict here to create a copy. Solves RuntimeError: dict size changed during iteration
+            available_sf: dict = dict(self.simulator.params.network.nodes[n_id]['available_sf'])
+            for sf, sf_params in available_sf.items():
+                # Remove VNFs if not active and timeout passed
+                if sf_params['load'] == 0.0:
+                    # VNF is not active
+                    if sf_params['last_active'] < now - timeout:
+                        # VNF has not been active for `timeout` time: remove
+                        del self.simulator.params.network.nodes[n_id]['available_sf'][sf]
+
+                else:
+                    # Node is active: update `last_active` time to be `now`
+                    self.simulator.params.network.nodes[n_id]['available_sf'][sf]['last_active'] = now
 
 
 # for debugging
@@ -268,7 +322,7 @@ if __name__ == "__main__":
 
     sim = Simulator(network_file, service_file, config_file)
     state = sim.init(seed=1234)
-    dummy_action = SimulatorAction(placement={}, scheduling={})
+    dummy_action = SPRAction(placement={}, scheduling={})
     # FIXME: this currently breaks - negative flow counter?
     #  should be possible to have an empty action and just drop all flows!
     state = sim.apply(dummy_action)
