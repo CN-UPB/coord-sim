@@ -29,6 +29,7 @@ class ResultWriter():
             self.rl_state_file_name = f"{test_dir}/rl_state.csv"
             self.run_flows_file_name = f"{test_dir}/run_flows.csv"
             self.flow_action_file_name = f"{test_dir}/flow_actions.csv"
+            self.runtimes_file_name = f"{test_dir}/runtimes.csv"
 
             # Create the results directory if not exists
             os.makedirs(os.path.dirname(self.placement_file_name), exist_ok=True)
@@ -39,6 +40,7 @@ class ResultWriter():
             self.rl_state_stream = open(self.rl_state_file_name, 'a+', newline='')
             self.run_flows_stream = open(self.run_flows_file_name, 'a+', newline='')
             self.flow_action_stream = open(self.flow_action_file_name, 'a+', newline='')
+            self.runtimes_stream = open(self.runtimes_file_name, 'a+', newline='')
 
             # Create CSV writers
             self.placement_writer = csv.writer(self.placement_stream)
@@ -47,6 +49,8 @@ class ResultWriter():
             self.rl_state_writer = csv.writer(self.rl_state_stream)
             self.run_flows_writer = csv.writer(self.run_flows_stream)
             self.flow_action_writer = csv.writer(self.flow_action_stream)
+            self.runtimes_writer = csv.writer(self.runtimes_stream)
+            self.action_number = 0
 
             # Write the headers to the files
             self.create_csv_headers()
@@ -60,6 +64,7 @@ class ResultWriter():
             self.rl_state_stream.close()
             self.run_flows_stream.close()
             self.flow_action_stream.close()
+            self.runtimes_stream.close()
 
     def create_csv_headers(self):
         """
@@ -75,6 +80,7 @@ class ResultWriter():
         flow_action_output_header = ['episode', 'time', 'flow_id', 'flow_rem_ttl', 'flow_ttl',
                                      'curr_node_id', 'dest_node', 'cur_node_rem_cap', 'next_node_rem_cap',
                                      'link_cap', 'link_rem_cap']
+        runtimes_output_header = ['action_number', 'runtime']
 
         # Write headers to CSV files
         self.placement_writer.writerow(placement_output_header)
@@ -186,3 +192,11 @@ class ResultWriter():
     def write_rl_state(self, rl_state):
         if self.test_mode:
             self.rl_state_writer.writerow(rl_state)
+
+    def write_runtime(self, time):
+        """
+        Write runtime results to output file
+        """
+        if self.test_mode:
+            self.action_number += 1
+            self.runtimes_writer.writerow([self.action_number, time])

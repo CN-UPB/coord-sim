@@ -152,10 +152,12 @@ class Simulator(SimulatorInterface):
         # Check to see if init called in warmup, if so, set warmup to false
         # This is to allow for better prediction and better overall control
         # in the future
+        self.last_apply_time = time.time()
         return simulator_state
 
     def apply(self, actions: SPRAction):
-
+        alg_runtime = time.time() - self.last_apply_time
+        self.writer.write_runtime(alg_runtime)
         # reset metrics for steps
         self.params.metrics.reset_run_metrics()
 
@@ -235,6 +237,7 @@ class Simulator(SimulatorInterface):
         self.writer.write_state_results(self.episode, self.env.now, simulator_state, self.params.metrics.get_metrics())
         logger.debug(f"t={self.env.now}: {simulator_state}")
 
+        self.last_apply_time = time.time()
         return simulator_state
 
     def parse_network(self) -> dict:
