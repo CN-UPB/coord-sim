@@ -88,6 +88,7 @@ class ResultWriter():
         self.metrics_writer.writerow(metrics_output_header)
         self.run_flows_writer.writerow(run_flows_output_header)
         self.flow_action_writer.writerow(flow_action_output_header)
+        self.runtimes_writer.writerow(runtimes_output_header)
 
     def write_action_result(self, episode, time, action: SPRAction, network):
         """
