@@ -83,6 +83,8 @@ class Simulator(SimulatorInterface):
 
         # Generate SimPy simulation environment
         self.env = simpy.Environment()
+        # Reset the time recorded time in the params
+        self.params.time = 0.0
 
         self.params.metrics.reset_metrics()
 
@@ -94,7 +96,7 @@ class Simulator(SimulatorInterface):
             if self.params.in_init_state:
                 self.params.in_init_state = False
             else:
-                self.params.update_state()
+                self.params.update_state(self.env.now)
 
         self.duration = self.params.run_duration
         # Get and plant random seed
@@ -214,7 +216,7 @@ class Simulator(SimulatorInterface):
         self.params.metrics.running_time(self.start_time, self.end_time)
 
         if self.params.use_states:
-            self.params.update_state()
+            self.params.update_state(self.env.now)
 
         # generate flow data for next run (used for prediction)
         # self.params.generate_flow_lists(now=self.env.now)
