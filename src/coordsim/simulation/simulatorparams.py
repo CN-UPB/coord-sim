@@ -13,6 +13,7 @@ import random
 class SimulatorParams:
     def __init__(self, network, ing_nodes, eg_nodes, sfc_list, sf_list, config: dict, metrics, prediction=False,
                  schedule=None, sf_placement=None):
+        self.time = 0.0
         # NetworkX network object: DiGraph
         self.network = network
         # Ingress nodes of the network (nodes at which flows arrive): list
@@ -120,25 +121,30 @@ class SimulatorParams:
         params_str += f"deterministic_size: {self.deterministic_size}\n"
         return params_str
 
-    def update_state(self):
+    def update_state(self, time):
         """
         Change or keep the MMP state for each of the network's node
         State change decision made based on the switch probability defined with states definition in config.
         """
-        for node_id in self.ing_nodes:
-            switch = [False, True]
-            current_state = self.current_states[node_id[0]]
-            change_prob = self.states[current_state]['switch_p']
-            remain_prob = 1 - change_prob
-            switch_decision = np.random.choice(switch, p=[remain_prob, change_prob])
-            if switch_decision:
-                state_names = list(self.states.keys())
-                if current_state == state_names[0]:
-                    current_state = state_names[1]
-                else:
-                    current_state = state_names[0]
-                self.current_states[node_id[0]] = current_state
-        self.update_inter_arr_mean()
+        # Update state at regular intervals
+        if time >= self.time + self.run_duration:
+            for node_id in self.ing_nodes:
+                switch = [False, True]
+                current_state = self.current_states[node_id[0]]
+                change_prob = self.states[current_state]['switch_p']
+                remain_prob = 1 - change_prob
+                switch_decision = np.random.choice(switch, p=[remain_prob, change_prob])
+                if switch_decision:
+                    state_names = list(self.states.keys())
+                    if current_state == state_names[0]:
+                        current_state = state_names[1]
+                    else:
+                        current_state = state_names[0]
+                    self.current_states[node_id[0]] = current_state
+            self.update_inter_arr_mean()
+
+            # Set the time to the current simulator time
+            self.time = time
 
     def update_inter_arr_mean(self):
         """Update inter arrival mean for each node based on """
